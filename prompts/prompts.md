@@ -60,8 +60,10 @@ Tras implementar cada punto de la investigación y/o plan, despliega en paralelo
 
 IMPORTANTE: Si la verificación o auditoría detecta que la implementación no es correcta o no cubre la planificación:
 - Haz los cambios necesarios para corregir la implementación por ti mismo sin esperar nuevas instrucciones.
-- NO HAGAS CAMBIOS SIN MI AUTORIZACIÓN. Reporta el problema y espera nuevas instrucciones.
 
+**EVALUACIÓN**
+Tras completar, evalúa y prueba el código implementado haciendo uso de:
+- MCP Opencode con modelo zai-coding-plan/glm-4.7
 
 # EVALUAR PULL REQUEST
 

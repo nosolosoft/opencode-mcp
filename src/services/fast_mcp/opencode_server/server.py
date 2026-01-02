@@ -1,12 +1,15 @@
 """
 OpenCode MCP Server
-Main server implementation with tool definitions.
+Simplified server focused on sending prompts to OpenCode.
+
+Uses HTTP serve API for persistent connection to opencode serve instance.
 """
 
 import asyncio
 import logging
+import os
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -14,8 +17,10 @@ from mcp.types import TextContent, Tool
 
 from .settings import settings
 from .models import OpenCodeResult
-from .opencode_executor import opencode_executor
-from .handlers import ExecutionHandler, SessionHandler, DiscoveryHandler
+from .handlers import (
+    ServeHandler,
+    get_serve_handler,
+)
 
 # Configure logging to stderr (never stdout for MCP)
 logging.basicConfig(
@@ -25,106 +30,80 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize server and handlers
+# Initialize server
 server = Server(settings.mcp_server_name)
-execution_handler = ExecutionHandler(opencode_executor)
-session_handler = SessionHandler(opencode_executor)
-discovery_handler = DiscoveryHandler(opencode_executor)
+
+# Serve handler (lazy initialized when tools are used)
+_serve_handler: Optional[ServeHandler] = None
 
 
-# Tool Definitions
+async def get_or_create_serve_handler() -> ServeHandler:
+    """Get or create the serve handler (lazy initialization)."""
+    global _serve_handler
+    if _serve_handler is None:
+        _serve_handler = get_serve_handler(
+            host=os.environ.get("OPENCODE_SERVE_HOST", "127.0.0.1"),
+            port=int(os.environ.get("OPENCODE_SERVE_PORT", "4096")),
+            # Auto-start enabled by default - server is shared across MCP sessions
+            auto_start_server=os.environ.get("OPENCODE_SERVE_AUTO_START", "true").lower() == "true",
+        )
+    return _serve_handler
+
+
+# =============================================================================
+# Tool Definitions - Simplified for core functionality
+# =============================================================================
 TOOLS = [
     Tool(
-        name="execute_opencode_command",
-        description="Execute any OpenCode CLI command with full flexibility. "
-        "This is the main tool for interacting with OpenCode.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "prompt": {
-                    "type": "string",
-                    "description": "The prompt or task description for OpenCode to execute",
-                },
-                "model": {
-                    "type": "string",
-                    "description": "Model to use in provider/model format (e.g., 'openai/gpt-4')",
-                },
-                "agent": {
-                    "type": "string",
-                    "description": "Agent to use for execution",
-                },
-                "session": {
-                    "type": "string",
-                    "description": "Session ID to continue from",
-                },
-                "continue_session": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "Whether to continue the last session",
-                },
-                "timeout": {
-                    "type": "integer",
-                    "minimum": 10,
-                    "maximum": 600,
-                    "default": 300,
-                    "description": "Timeout in seconds (default: 300)",
-                },
-            },
-            "required": ["prompt"],
-        },
-    ),
-    Tool(
-        name="opencode_run",
-        description="Run OpenCode with a simple prompt message. "
-        "Best for quick, one-off tasks.",
+        name="opencode_prompt",
+        description="Send a prompt to OpenCode. This is the main tool for interacting with OpenCode. "
+        "Uses persistent HTTP connection for fast response.",
         inputSchema={
             "type": "object",
             "properties": {
                 "message": {
                     "type": "string",
-                    "description": "Message/prompt to send to OpenCode",
+                    "description": "The prompt/message to send to OpenCode",
+                },
+                "directory": {
+                    "type": "string",
+                    "description": "Working directory for the operation (optional)",
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Existing session ID to continue conversation (optional)",
                 },
                 "model": {
                     "type": "string",
-                    "description": "Model to use in provider/model format",
-                },
-                "agent": {
-                    "type": "string",
-                    "description": "Agent to use for execution",
-                },
-                "files": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Files to attach to the message",
+                    "description": "Model in provider/model format, e.g., 'anthropic/claude-sonnet-4-20250514' (optional)",
                 },
                 "timeout": {
-                    "type": "integer",
+                    "type": "number",
                     "default": 300,
-                    "description": "Timeout in seconds",
+                    "description": "Timeout in seconds (default: 300)",
                 },
             },
             "required": ["message"],
         },
     ),
     Tool(
-        name="opencode_continue_session",
-        description="Continue an existing OpenCode session. "
-        "Use this to resume work from a previous session.",
+        name="opencode_status",
+        description="Get status of the OpenCode serve instance. "
+        "Returns server health, connection info, and session statistics.",
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    Tool(
+        name="opencode_abort",
+        description="Abort a running session. Use when a prompt is taking too long or needs to be cancelled.",
         inputSchema={
             "type": "object",
             "properties": {
                 "session_id": {
                     "type": "string",
-                    "description": "Session ID to continue",
-                },
-                "message": {
-                    "type": "string",
-                    "description": "Optional follow-up message",
-                },
-                "timeout": {
-                    "type": "integer",
-                    "default": 300,
-                    "description": "Timeout in seconds",
+                    "description": "Session ID to abort",
                 },
             },
             "required": ["session_id"],
@@ -132,37 +111,15 @@ TOOLS = [
     ),
     Tool(
         name="opencode_list_models",
-        description="List available models in OpenCode. "
-        "Optionally filter by provider.",
+        description="List available LLM models/providers from OpenCode.",
         inputSchema={
             "type": "object",
-            "properties": {
-                "provider": {
-                    "type": "string",
-                    "description": "Filter by provider (optional)",
-                },
-            },
+            "properties": {},
         },
     ),
     Tool(
-        name="opencode_export_session",
-        description="Export an OpenCode session as JSON. "
-        "Use this to retrieve artifacts and history from a session.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "session_id": {
-                    "type": "string",
-                    "description": "Session ID to export",
-                },
-            },
-            "required": ["session_id"],
-        },
-    ),
-    Tool(
-        name="opencode_get_status",
-        description="Check OpenCode CLI availability and status. "
-        "Returns version, available models, and CLI path.",
+        name="opencode_list_sessions",
+        description="List all active sessions. Useful to find session IDs for continuing conversations.",
         inputSchema={
             "type": "object",
             "properties": {},
@@ -193,48 +150,30 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
 
     try:
         result: OpenCodeResult
+        serve_handler = await get_or_create_serve_handler()
 
-        if name == "execute_opencode_command":
-            result = await execution_handler.execute_generic(
-                prompt=arguments["prompt"],
-                model=arguments.get("model"),
-                agent=arguments.get("agent"),
-                session=arguments.get("session"),
-                continue_session=arguments.get("continue_session", False),
-                timeout=arguments.get("timeout"),
-            )
-
-        elif name == "opencode_run":
-            result = await execution_handler.run(
+        if name == "opencode_prompt":
+            result = await serve_handler.prompt(
                 message=arguments["message"],
+                directory=arguments.get("directory"),
+                session_id=arguments.get("session_id"),
                 model=arguments.get("model"),
-                agent=arguments.get("agent"),
-                files=arguments.get("files"),
-                timeout=arguments.get("timeout"),
+                timeout=arguments.get("timeout", 300),
             )
 
-        elif name == "opencode_continue_session":
-            result = await execution_handler.continue_session(
+        elif name == "opencode_status":
+            result = await serve_handler.get_serve_status()
+
+        elif name == "opencode_abort":
+            result = await serve_handler.abort_session(
                 session_id=arguments["session_id"],
-                message=arguments.get("message"),
-                timeout=arguments.get("timeout"),
             )
 
         elif name == "opencode_list_models":
-            result = await discovery_handler.list_models(
-                provider=arguments.get("provider")
-            )
+            result = await serve_handler.get_providers()
 
-        elif name == "opencode_export_session":
-            result = await session_handler.export_session(
-                session_id=arguments["session_id"]
-            )
-
-        elif name == "opencode_get_status":
-            status = await discovery_handler.get_status()
-            # Convert status to JSON string
-            result_json = status.model_dump_json(indent=2)
-            return [TextContent(type="text", text=result_json)]
+        elif name == "opencode_list_sessions":
+            result = await serve_handler.list_sessions()
 
         else:
             raise ValueError(f"Unknown tool: {name}")
@@ -249,6 +188,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             success=False,
             error=f"Error executing tool {name}: {str(e)}",
             execution_time=0.0,
+            exit_code=1,
         )
         return [TextContent(type="text", text=error_result.model_dump_json(indent=2))]
 
@@ -256,27 +196,23 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
 async def main():
     """Main entry point for the MCP server."""
     logger.info(f"Starting OpenCode MCP Server v{settings.mcp_server_version}")
-    logger.info(f"OpenCode command: {settings.opencode_command}")
     logger.info(f"Default timeout: {settings.default_timeout}s")
 
-    # Check if OpenCode CLI is available
-    status = await discovery_handler.get_status()
-    if status.status != "available":
-        logger.error(f"OpenCode CLI not available: {status.error}")
-        logger.error("Please ensure OpenCode is installed: npm i -g opencode-ai")
-        sys.exit(1)
-
-    logger.info(f"OpenCode CLI is available. Version: {status.version}")
-    if status.available_models:
-        logger.info(f"Available models: {len(status.available_models)}")
-
-    # Run the MCP server with stdio transport
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            server.create_initialization_options(),
-        )
+    try:
+        # Run the MCP server with stdio transport
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(
+                read_stream,
+                write_stream,
+                server.create_initialization_options(),
+            )
+    finally:
+        # Cleanup serve handler if it was initialized
+        global _serve_handler
+        if _serve_handler is not None:
+            logger.info("Shutting down serve handler...")
+            await _serve_handler.shutdown()
+            _serve_handler = None
 
 
 if __name__ == "__main__":

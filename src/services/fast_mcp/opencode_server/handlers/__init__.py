@@ -1,10 +1,12 @@
 """
 OpenCode MCP Server Handlers
-Specialized handlers for different OpenCode operations.
+Handler for OpenCode serve HTTP API operations.
 """
 
-from .execution import ExecutionHandler
-from .session import SessionHandler
-from .discovery import DiscoveryHandler
+from .serve_handler import ServeHandler, get_serve_handler, shutdown_serve_handler
 
-__all__ = ["ExecutionHandler", "SessionHandler", "DiscoveryHandler"]
+__all__ = [
+    "ServeHandler",
+    "get_serve_handler",
+    "shutdown_serve_handler",
+]
