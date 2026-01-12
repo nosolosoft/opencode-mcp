@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     # OpenCode CLI Configuration
     opencode_command: str = "opencode"
-    opencode_default_model: Optional[str] = None
+    opencode_default_model: Optional[str] = "google/antigravity-claude-opus-4-5-thinking"
     opencode_default_agent: Optional[str] = None
 
     # Timeout Configuration

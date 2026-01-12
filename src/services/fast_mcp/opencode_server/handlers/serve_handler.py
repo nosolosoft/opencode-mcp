@@ -13,6 +13,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from ..models import OpenCodeResult
+from ..settings import settings
 from ..serve_client import (
     OpenCodeServeClient,
     SessionManager,
@@ -268,10 +269,12 @@ class ServeHandler:
                 # Get from session manager
                 sid = await self.session_manager.get_session(directory)
 
-            # Parse model if provided
+            # Parse model if provided, or use default
             model_info = None
-            if model and "/" in model:
-                provider, model_id = model.split("/", 1)
+            model_to_use = model or settings.opencode_default_model
+
+            if model_to_use and "/" in model_to_use:
+                provider, model_id = model_to_use.split("/", 1)
                 model_info = ModelInfo(providerID=provider, modelID=model_id)
 
             # Validate model if specified (soft validation by default)
