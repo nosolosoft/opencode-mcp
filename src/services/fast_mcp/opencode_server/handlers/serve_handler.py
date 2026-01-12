@@ -230,11 +230,11 @@ class ServeHandler:
         stream: bool = False,
     ) -> OpenCodeResult:
         """
-        Send a prompt to OpenCode via the serve API.
-        
+        Send a prompt to OpenCode via the serve API with auto-recovery for corrupted sessions.
+
         This is the main entry point for interacting with OpenCode through
         the HTTP API instead of subprocess.
-        
+
         Args:
             message: The prompt/message to send
             directory: Working directory (defaults to self.default_directory)
@@ -243,18 +243,22 @@ class ServeHandler:
             agent: Agent to use
             timeout: Timeout in seconds
             stream: Whether to stream the response
-            
+
         Returns:
             OpenCodeResult with response data
         """
         import time
         start_time = time.time()
-        
+
         await self._ensure_initialized()
-        
+
         directory = directory or self.default_directory
         timeout = timeout or self.default_timeout
-        
+
+        # Track if we should retry on failure
+        is_managed_session = session_id is None
+        retry_attempted = False
+
         try:
             # Get or create session
             if session_id:
@@ -263,7 +267,7 @@ class ServeHandler:
             else:
                 # Get from session manager
                 sid = await self.session_manager.get_session(directory)
-            
+
             # Parse model if provided
             model_info = None
             if model and "/" in model:
@@ -274,11 +278,11 @@ class ServeHandler:
             if model_info:
                 await self._validate_model(model_info, soft=True)
 
-            try:
+            async def _execute_prompt(current_sid: str):
+                """Execute prompt with given session."""
                 if stream:
-                    # Stream response
-                    response = await self._stream_prompt(
-                        session_id=sid,
+                    return await self._stream_prompt(
+                        session_id=current_sid,
                         message=message,
                         model=model_info,
                         agent=agent,
@@ -286,18 +290,19 @@ class ServeHandler:
                         directory=directory,
                     )
                 else:
-                    # Synchronous response
                     messages = await self.client.prompt(
-                        session_id=sid,
+                        session_id=current_sid,
                         text=message,
                         model=model_info,
                         agent=agent,
                     )
-                    
-                    response = self._extract_response_text(messages)
-                
+                    return self._extract_response_text(messages)
+
+            try:
+                response = await _execute_prompt(sid)
+
                 execution_time = time.time() - start_time
-                
+
                 return OpenCodeResult(
                     success=True,
                     data=response,
@@ -306,12 +311,46 @@ class ServeHandler:
                     exit_code=0,
                     raw_output=response.get("text") if isinstance(response, dict) else str(response),
                 )
-                
+
+            except ValueError as e:
+                # Check for "empty response" (corrupted session indicator)
+                is_empty_response = "empty response" in str(e).lower()
+
+                if is_empty_response and is_managed_session and not retry_attempted:
+                    logger.warning(f"Session {sid} returned empty response, retrying with new session")
+                    retry_attempted = True
+
+                    # 1. Invalidate corrupted session (async, public method)
+                    await self.session_manager.invalidate_session(sid)
+
+                    # 2. Get NEW session (force new)
+                    sid = await self.session_manager.get_session(
+                        directory,
+                        prefer_existing=False  # Force new
+                    )
+
+                    # 3. Retry once
+                    response = await _execute_prompt(sid)
+
+                    execution_time = time.time() - start_time
+
+                    return OpenCodeResult(
+                        success=True,
+                        data=response,
+                        session_id=sid,
+                        execution_time=execution_time,
+                        exit_code=0,
+                        raw_output=response.get("text") if isinstance(response, dict) else str(response),
+                    )
+                else:
+                    # Not recoverable or already retried
+                    raise
+
             finally:
                 # Release session if we got it from manager
-                if not session_id:
+                if is_managed_session:
                     self.session_manager.release_session(sid)
-                    
+
         except SessionBusyError as e:
             return OpenCodeResult(
                 success=False,
@@ -320,7 +359,7 @@ class ServeHandler:
                 exit_code=1,
             )
         except Exception as e:
-            logger.error(f"Prompt error: {e}")
+            logger.error(f"Prompt error: {e}", exc_info=True)
             return OpenCodeResult(
                 success=False,
                 error=str(e),

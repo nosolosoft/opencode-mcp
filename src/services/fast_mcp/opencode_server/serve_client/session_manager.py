@@ -161,35 +161,48 @@ class SessionManager:
     ) -> str:
         """
         Get or create a session for a directory.
-        
+
         Args:
             directory: Working directory
             title: Optional session title
             prefer_existing: Prefer reusing existing idle session
-            
+
         Returns:
             Session ID
         """
-        # Try to get existing idle session
+        # Try to get existing idle session WITH VALIDATION LOOP
         if prefer_existing:
-            session_id = self._get_idle_session(directory)
-            if session_id:
-                info = self._sessions[session_id]
-                info.mark_used()
-                info.mark_busy(True)
-                self._busy_sessions.add(session_id)
-                logger.debug(f"Reusing session {session_id} for {directory}")
-                return session_id
-        
+            while True:
+                session_id = self._get_idle_session(directory)
+                if not session_id:
+                    break  # No more candidates, create new
+
+                # Validate before reusing
+                is_valid = await self._validate_session_exists(session_id)
+
+                if is_valid:
+                    # Valid session - reuse it
+                    info = self._sessions[session_id]
+                    info.mark_used()
+                    info.mark_busy(True)
+                    self._busy_sessions.add(session_id)
+                    logger.debug(f"Reusing validated session {session_id} for {directory}")
+                    return session_id
+                else:
+                    # Zombie session - remove and try next candidate
+                    logger.warning(f"Found zombie session {session_id}, removing from pool")
+                    await self._remove_session(session_id)
+                    # Loop continues to check next candidate
+
         # Check limits
         await self._enforce_limits(directory)
-        
+
         # Create new session
         session = await self.client.create_session(
             title=title or f"MCP Session - {directory}",
             directory=directory,
         )
-        
+
         # Register session
         info = SessionInfo(
             session=session,
@@ -197,15 +210,15 @@ class SessionManager:
             title=title,
         )
         info.mark_busy(True)
-        
+
         self._sessions[session.id] = info
-        
+
         if directory not in self._dir_sessions:
             self._dir_sessions[directory] = set()
         self._dir_sessions[directory].add(session.id)
-        
+
         self._busy_sessions.add(session.id)
-        
+
         logger.info(f"Created new session {session.id} for {directory}")
         return session.id
     
@@ -273,29 +286,37 @@ class SessionManager:
         max_age: Optional[float] = None,
     ) -> int:
         """
-        Cleanup idle and old sessions.
-        
+        Cleanup idle and old sessions, including zombie sessions.
+
         Args:
             max_idle: Max idle time (defaults to self.max_idle_time)
             max_age: Max age (defaults to self.max_session_age)
-            
+
         Returns:
             Number of sessions cleaned up
         """
         max_idle = max_idle or self.max_idle_time
         max_age = max_age or self.max_session_age
-        
+
         to_cleanup = []
-        
+
         for session_id, info in list(self._sessions.items()):
             # Skip busy sessions
             if session_id in self._busy_sessions:
                 continue
-            
-            # Check idle time and age
+
+            # Check idle time and age (existing logic)
             if info.idle_time > max_idle or info.age > max_age:
                 to_cleanup.append(session_id)
-        
+                continue
+
+            # NEW: Check zombie sessions (idle > 60s)
+            if info.idle_time > 60:
+                is_valid = await self._validate_session_exists(session_id)
+                if not is_valid:
+                    logger.warning(f"Found zombie session {session_id} during cleanup")
+                    to_cleanup.append(session_id)
+
         # Cleanup
         cleaned = 0
         for session_id in to_cleanup:
@@ -304,10 +325,10 @@ class SessionManager:
                 cleaned += 1
             except Exception as e:
                 logger.error(f"Failed to cleanup session {session_id}: {e}")
-        
+
         if cleaned > 0:
-            logger.info(f"Cleaned up {cleaned} idle/old sessions")
-        
+            logger.info(f"Cleaned up {cleaned} sessions (including zombies)")
+
         return cleaned
     
     async def cleanup_all_sessions(self) -> int:
@@ -332,30 +353,64 @@ class SessionManager:
     async def refresh_session_status(self, session_id: str) -> Optional[SessionStatus]:
         """
         Refresh session status from server.
-        
+
         Args:
             session_id: Session to refresh
-            
+
         Returns:
             Current session status
         """
         try:
             status = await self.client.get_session_status(session_id)
-            
+
             if session_id in self._sessions:
                 info = self._sessions[session_id]
                 is_busy = status.type == SessionStatusType.BUSY
                 info.mark_busy(is_busy)
-                
+
                 if is_busy:
                     self._busy_sessions.add(session_id)
                 else:
                     self._busy_sessions.discard(session_id)
-            
+
             return status
         except Exception as e:
             logger.error(f"Failed to refresh session status: {e}")
             return None
+
+    async def _validate_session_exists(self, session_id: str) -> bool:
+        """
+        Validate that a session exists on the server.
+
+        IMPORTANT: Uses get_session() NOT get_session_status() because
+        get_session_status() returns IDLE for missing sessions instead of error.
+
+        Args:
+            session_id: Session to validate
+
+        Returns:
+            True if session exists, False otherwise
+        """
+        try:
+            # get_session() throws on 404, get_session_status() returns IDLE
+            session = await self.client.get_session(session_id)
+            return session is not None
+        except Exception as e:
+            logger.debug(f"Session {session_id} validation failed: {e}")
+            return False
+
+    async def invalidate_session(self, session_id: str) -> None:
+        """
+        Publicly invalidate/remove a corrupted session.
+
+        This method is called by ServeHandler when a session returns
+        an empty response, indicating it was deleted externally.
+
+        Args:
+            session_id: Session to invalidate
+        """
+        await self._remove_session(session_id)
+        logger.info(f"Invalidated corrupted session {session_id}")
     
     def _get_idle_session(self, directory: str) -> Optional[str]:
         """Get an idle session for a directory (LRU selection)."""
