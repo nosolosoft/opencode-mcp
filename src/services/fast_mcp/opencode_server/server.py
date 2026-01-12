@@ -170,6 +170,8 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                     message=arguments.get("message"),
                     timeout=arguments.get("timeout", 300),
                 )
+                # Sessions continue with their original model (not changeable)
+                result.model = f"(session continues with original model)"
             else:
                 # New session
                 result = await execution_handler.run(
@@ -177,6 +179,8 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                     model=model,
                     timeout=arguments.get("timeout", 300),
                 )
+                # Add model to result for visibility
+                result.model = model
 
         # Other tools still use serve_handler
         elif name == "opencode_status":

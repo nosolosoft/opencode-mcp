@@ -18,6 +18,9 @@ class OpenCodeResult(BaseModel):
     session_id: Optional[str] = Field(
         default=None, description="Session ID for continuation"
     )
+    model: Optional[str] = Field(
+        default=None, description="Model used for execution"
+    )
     execution_time: float = Field(
         default=0.0, description="Execution time in seconds"
     )
