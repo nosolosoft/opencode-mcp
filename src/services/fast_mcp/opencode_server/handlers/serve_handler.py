@@ -545,16 +545,38 @@ class ServeHandler:
         await self._ensure_initialized()
 
         try:
-            providers = await self.client.get_providers()
+            providers_data = await self.client.get_providers()
+
+            # Handle API response format: can be list or {"all": [list]}
+            if isinstance(providers_data, dict) and "all" in providers_data:
+                providers = providers_data["all"]
+            elif isinstance(providers_data, list):
+                providers = providers_data
+            else:
+                providers = []
 
             # Format as structured list
             models_list = []
             for provider in providers:
+                if not isinstance(provider, dict):
+                    continue
+
                 provider_id = provider.get("id", "")
-                for model in provider.get("models", []):
-                    model_id = model.get("id", "")
-                    if provider_id and model_id:
-                        models_list.append(f"{provider_id}/{model_id}")
+                models = provider.get("models", {})
+
+                # Models can be dict or list
+                if isinstance(models, dict):
+                    # Models is a dict: {model_id: model_obj}
+                    for model_id, model_obj in models.items():
+                        if provider_id and model_id:
+                            models_list.append(f"{provider_id}/{model_id}")
+                elif isinstance(models, list):
+                    # Models is a list: [model_obj, ...]
+                    for model in models:
+                        if isinstance(model, dict):
+                            model_id = model.get("id", "")
+                            if provider_id and model_id:
+                                models_list.append(f"{provider_id}/{model_id}")
 
             return OpenCodeResult(
                 success=True,
