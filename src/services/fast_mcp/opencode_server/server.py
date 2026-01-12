@@ -93,20 +93,6 @@ TOOLS = [
         },
     ),
     Tool(
-        name="opencode_abort",
-        description="Abort a running session. Use when a prompt is taking too long or needs to be cancelled.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "session_id": {
-                    "type": "string",
-                    "description": "Session ID to abort",
-                },
-            },
-            "required": ["session_id"],
-        },
-    ),
-    Tool(
         name="opencode_list_models",
         description="List available LLM models/providers from OpenCode CLI. "
         "Returns all available models in provider/model format.",
@@ -181,12 +167,6 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 )
                 # Add model to result for visibility
                 result.model = model
-
-        elif name == "opencode_abort":
-            serve_handler = await get_or_create_serve_handler()
-            result = await serve_handler.abort_session(
-                session_id=arguments["session_id"],
-            )
 
         elif name == "opencode_list_models":
             # Use CLI to get all available models (serve API has limited subset)
