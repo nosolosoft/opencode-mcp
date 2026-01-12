@@ -48,7 +48,10 @@ async def get_or_create_serve_handler() -> ServeHandler:
             host=os.environ.get("OPENCODE_SERVE_HOST", "127.0.0.1"),
             port=int(os.environ.get("OPENCODE_SERVE_PORT", "4096")),
             # Auto-start enabled by default - server is shared across MCP sessions
-            auto_start_server=os.environ.get("OPENCODE_SERVE_AUTO_START", "true").lower() == "true",
+            auto_start_server=os.environ.get(
+                "OPENCODE_SERVE_AUTO_START", "true"
+            ).lower()
+            == "true",
         )
     return _serve_handler
 
@@ -205,8 +208,9 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             result = await executor.list_models(provider=arguments.get("provider"))
 
         elif name == "opencode_list_sessions":
-            serve_handler = await get_or_create_serve_handler()
-            result = await serve_handler.list_sessions()
+            # Use CLI instead of serve API to list sessions
+            executor = OpenCodeExecutor()
+            result = await executor.list_sessions()
 
         else:
             raise ValueError(f"Unknown tool: {name}")

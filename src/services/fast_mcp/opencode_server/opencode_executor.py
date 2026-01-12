@@ -61,9 +61,7 @@ class OpenCodeExecutor:
         start_time = time.time()
 
         # Validate timeout
-        effective_timeout = min(
-            timeout or self.default_timeout, self.max_timeout
-        )
+        effective_timeout = min(timeout or self.default_timeout, self.max_timeout)
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -165,9 +163,9 @@ class OpenCodeExecutor:
             elif isinstance(json_data, dict):
                 # Single JSON object
                 session_id = (
-                    json_data.get("sessionID") or
-                    json_data.get("session") or
-                    json_data.get("session_id")
+                    json_data.get("sessionID")
+                    or json_data.get("session")
+                    or json_data.get("session_id")
                 )
                 # Check if it's a text event
                 if json_data.get("type") == "text":
@@ -196,7 +194,9 @@ class OpenCodeExecutor:
             stderr=stderr if stderr else None,
         )
 
-    def _extract_json(self, text: str) -> Optional[List[Dict[str, Any]] | Dict[str, Any]]:
+    def _extract_json(
+        self, text: str
+    ) -> Optional[List[Dict[str, Any]] | Dict[str, Any]]:
         """
         Extract JSON from text, handling JSON Lines format (newline-delimited JSON).
 
@@ -325,9 +325,7 @@ class OpenCodeExecutor:
 
         return await self.execute_command(args, timeout=timeout)
 
-    async def list_models(
-        self, provider: Optional[str] = None
-    ) -> OpenCodeResult:
+    async def list_models(self, provider: Optional[str] = None) -> OpenCodeResult:
         """
         List available models.
 
@@ -339,6 +337,15 @@ class OpenCodeExecutor:
         if provider:
             args.append(provider)
 
+        return await self.execute_command(args, use_json_format=False)
+
+    async def list_sessions(self) -> OpenCodeResult:
+        """
+        List all active sessions using CLI.
+
+        Returns list of sessions managed by OpenCode CLI.
+        """
+        args = ["session", "list"]
         return await self.execute_command(args, use_json_format=False)
 
     async def export_session(self, session_id: str) -> OpenCodeResult:
@@ -365,9 +372,7 @@ class OpenCodeExecutor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _ = await asyncio.wait_for(
-                process.communicate(), timeout=10
-            )
+            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=10)
             version = stdout.decode("utf-8", errors="replace").strip()
             return version if version else None
         except Exception as e:
@@ -413,12 +418,14 @@ class OpenCodeExecutor:
                 elif isinstance(models_result.data, dict):
                     # Try common keys for model lists
                     available_models = (
-                        models_result.data.get("models") or
-                        models_result.data.get("items") or
-                        models_result.data.get("raw_output", "").split("\n")
+                        models_result.data.get("models")
+                        or models_result.data.get("items")
+                        or models_result.data.get("raw_output", "").split("\n")
                     )
                     if isinstance(available_models, str):
-                        available_models = [m.strip() for m in available_models.split("\n") if "/" in m]
+                        available_models = [
+                            m.strip() for m in available_models.split("\n") if "/" in m
+                        ]
 
         return OpenCodeStatusResponse(
             status="available",
