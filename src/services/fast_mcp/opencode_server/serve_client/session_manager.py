@@ -170,57 +170,74 @@ class SessionManager:
         Returns:
             Session ID
         """
-        # Try to get existing idle session WITH VALIDATION LOOP
-        if prefer_existing:
-            while True:
-                session_id = self._get_idle_session(directory)
-                if not session_id:
-                    break  # No more candidates, create new
+        # Use lock to prevent race conditions when acquiring sessions
+        async with self._creation_lock:
+            # Try to get existing idle session WITH VALIDATION LOOP
+            if prefer_existing:
+                # First, clean any zombie sessions in this directory (including busy ones)
+                if directory in self._dir_sessions:
+                    for session_id in list(self._dir_sessions.get(directory, set())):
+                        # Skip recently used sessions (< 10 seconds)
+                        info = self._sessions.get(session_id)
+                        if info and info.idle_time < 10:
+                            continue
 
-                # Validate before reusing
-                is_valid = await self._validate_session_exists(session_id)
+                        # Validate older sessions
+                        is_valid = await self._validate_session_exists(session_id)
+                        if not is_valid:
+                            logger.warning(f"Found zombie session {session_id} (busy={session_id in self._busy_sessions}), removing")
+                            await self._remove_session(session_id)
 
-                if is_valid:
-                    # Valid session - reuse it
-                    info = self._sessions[session_id]
-                    info.mark_used()
-                    info.mark_busy(True)
-                    self._busy_sessions.add(session_id)
-                    logger.debug(f"Reusing validated session {session_id} for {directory}")
-                    return session_id
-                else:
-                    # Zombie session - remove and try next candidate
-                    logger.warning(f"Found zombie session {session_id}, removing from pool")
-                    await self._remove_session(session_id)
-                    # Loop continues to check next candidate
+                # Now try to get an idle session
+                while True:
+                    session_id = self._get_idle_session(directory)
+                    if not session_id:
+                        break  # No more idle candidates, create new
 
-        # Check limits
-        await self._enforce_limits(directory)
+                    # Validate before reusing
+                    is_valid = await self._validate_session_exists(session_id)
 
-        # Create new session
-        session = await self.client.create_session(
-            title=title or f"MCP Session - {directory}",
-            directory=directory,
-        )
+                    if is_valid:
+                        # Valid session - reuse it
+                        info = self._sessions[session_id]
+                        info.mark_used()
+                        info.mark_busy(True)
+                        self._busy_sessions.add(session_id)
+                        logger.debug(f"Reusing validated session {session_id} for {directory}")
+                        return session_id
+                    else:
+                        # Zombie session - remove and try next candidate
+                        logger.warning(f"Found zombie session {session_id}, removing from pool")
+                        await self._remove_session(session_id)
+                        # Loop continues to check next candidate
 
-        # Register session
-        info = SessionInfo(
-            session=session,
-            directory=directory,
-            title=title,
-        )
-        info.mark_busy(True)
+            # Check limits
+            await self._enforce_limits(directory)
 
-        self._sessions[session.id] = info
+            # Create new session
+            session = await self.client.create_session(
+                title=title or f"MCP Session - {directory}",
+                directory=directory,
+            )
 
-        if directory not in self._dir_sessions:
-            self._dir_sessions[directory] = set()
-        self._dir_sessions[directory].add(session.id)
+            # Register session
+            info = SessionInfo(
+                session=session,
+                directory=directory,
+                title=title,
+            )
+            info.mark_busy(True)
 
-        self._busy_sessions.add(session.id)
+            self._sessions[session.id] = info
 
-        logger.info(f"Created new session {session.id} for {directory}")
-        return session.id
+            if directory not in self._dir_sessions:
+                self._dir_sessions[directory] = set()
+            self._dir_sessions[directory].add(session.id)
+
+            self._busy_sessions.add(session.id)
+
+            logger.info(f"Created new session {session.id} for {directory}")
+            return session.id
     
     def release_session(self, session_id: str) -> None:
         """

@@ -280,23 +280,30 @@ class ServeHandler:
 
             async def _execute_prompt(current_sid: str):
                 """Execute prompt with given session."""
-                if stream:
-                    return await self._stream_prompt(
-                        session_id=current_sid,
-                        message=message,
-                        model=model_info,
-                        agent=agent,
-                        timeout=timeout,
-                        directory=directory,
-                    )
-                else:
-                    messages = await self.client.prompt(
-                        session_id=current_sid,
-                        text=message,
-                        model=model_info,
-                        agent=agent,
-                    )
-                    return self._extract_response_text(messages)
+                try:
+                    if stream:
+                        return await self._stream_prompt(
+                            session_id=current_sid,
+                            message=message,
+                            model=model_info,
+                            agent=agent,
+                            timeout=timeout,
+                            directory=directory,
+                        )
+                    else:
+                        messages = await self.client.prompt(
+                            session_id=current_sid,
+                            text=message,
+                            model=model_info,
+                            agent=agent,
+                        )
+                        return self._extract_response_text(messages)
+                except Exception as e:
+                    # Convert streaming errors to ValueError for unified handling
+                    error_msg = str(e).lower()
+                    if "empty" in error_msg or "timeout" in error_msg or "sse" in error_msg:
+                        raise ValueError(f"Stream error (possible corrupted session): {e}") from e
+                    raise
 
             try:
                 response = await _execute_prompt(sid)
