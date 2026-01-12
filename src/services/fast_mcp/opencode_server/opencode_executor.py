@@ -6,14 +6,21 @@ Async subprocess wrapper with timeout handling and robust JSON parsing.
 import asyncio
 import json
 import logging
+import os
 import shutil
 import time
 from typing import Any, Dict, List, Optional
+
+import httpx
 
 from .models import OpenCodeResult, OpenCodeStatusResponse
 from .settings import settings
 
 logger = logging.getLogger(__name__)
+
+# Serve server configuration from environment
+SERVE_HOST = os.environ.get("OPENCODE_SERVE_HOST", "127.0.0.1")
+SERVE_PORT = int(os.environ.get("OPENCODE_SERVE_PORT", "4096"))
 
 
 class OpenCodeExecutor:
@@ -274,6 +281,15 @@ class OpenCodeExecutor:
 
         return await self.execute_command(args, timeout=timeout)
 
+    async def _is_serve_running(self) -> bool:
+        """Check if opencode serve is running on the configured port."""
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                response = await client.get(f"http://{SERVE_HOST}:{SERVE_PORT}/doc")
+                return response.status_code == 200
+        except Exception:
+            return False
+
     async def continue_session(
         self,
         session_id: str,
@@ -289,10 +305,18 @@ class OpenCodeExecutor:
             timeout: Optional timeout in seconds
 
         Note: Message is placed LAST in args to follow CLI best practices.
+        If opencode serve is running, uses --attach to connect to it
+        and avoid port conflicts.
         """
         args = ["run"]
 
-        # Add session flags FIRST
+        # Check if serve is running and attach to it to avoid port conflicts
+        if await self._is_serve_running():
+            serve_url = f"http://{SERVE_HOST}:{SERVE_PORT}"
+            args.extend(["--attach", serve_url])
+            logger.debug(f"Attaching to running serve at {serve_url}")
+
+        # Add session flags
         args.extend(["--session", session_id, "--continue"])
 
         # Add message as LAST positional argument (if provided)

@@ -70,7 +70,7 @@ Basado en el Principio 5: Forzar al modelo a mostrar reglas en cada respuesta cr
 **Droid MCP Server** - Terminal Operations & AI Integration
 - **Location**: `~/IA/droid_mcp/`
 - **Tool**: `mcp__droid-cli__execute_droid_command`
-- **Models**: GLM-4.6 (default via Pro subscription)
+- **Models**: GLM-4.7 (default via Pro subscription)
 - **Configuration**: Configured in `~/.claude.json`
 - **Capabilities**: Terminal operations, bash automation, migrations, enterprise tooling, reasoning
 - **Benchmark**: 58.8% Terminal-Bench score
@@ -100,6 +100,37 @@ When working with MCP servers:
 - **Gemini**: Use for large document analysis, comprehensive explanations
 - **Codex**: Use for autonomous coding tasks requiring multiple iterations
 - **Memory**: Use for persistent knowledge that should survive sessions
+
+### CLI Alternatives (Skill Delegacion)
+
+Además de los MCP servers, se puede usar CLI directo via skill `delegacion` para ejecución en **background**:
+
+| CLI | Comando | Default Model | Cuándo Usar |
+|-----|---------|---------------|-------------|
+| OpenCode | `opencode run -m MODEL "PROMPT"` | glm-4.7 | Background tasks, paralelo |
+| Gemini | `gemini --model MODEL --yolo "PROMPT"` | gemini-3-pro-preview | Análisis largo, fire-and-forget |
+| Codex | `codex exec -m MODEL --dangerously-bypass-approvals-and-sandbox "PROMPT"` | gpt-5.1-codex-max | Implementación larga |
+| Claude | `claude -p --model MODEL --dangerously-skip-permissions "PROMPT"` | opus | Decisiones delegadas |
+
+**Triggers para CLI**: "delega a", "pásale a", "encárgale a", "background:", "CLI:", "nueva terminal:"
+
+### MCP vs CLI: Decision Guide
+
+```
+MCP (inline):  Usuario necesita el resultado para continuar trabajando
+CLI (background): Usuario puede seguir con otra cosa mientras se ejecuta
+```
+
+| Escenario | MCP | CLI |
+|-----------|-----|-----|
+| Resultado necesario para siguiente paso | SI | - |
+| Usuario puede continuar con otra tarea | - | SI |
+| Ejecución paralela requerida | - | SI |
+| Fire-and-forget explícito | - | SI |
+| Trigger "delega a", "pásale a" | - | SI |
+| Contexto compartido crítico | SI | - |
+
+**Nota**: Los CLIs se ejecutan via `Bash(command="...", run_in_background=true)`. Monitorear con `/tasks`.
 
 ## 🎯 ROUTING INTELIGENTE CODEX-CÉNTRICO (90% Reducción Claude)
 
@@ -393,7 +424,7 @@ To verify Claude Desktop connection:
 4. Review logs in `~/Library/Logs/Claude/mcp*.log`
 
 ## Documentation Sources
-- OpenCode CLI: https://opencode.ai/docs/cli/
+- OpenCode: https://opencode.ai/docs/
 - OpenCode GitHub: https://github.com/sst/opencode
 - MCP Build: https://modelcontextprotocol.io/docs/develop/build-server
 
