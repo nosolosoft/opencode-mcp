@@ -93,15 +93,6 @@ TOOLS = [
         },
     ),
     Tool(
-        name="opencode_status",
-        description="Get status of the OpenCode serve instance. "
-        "Returns server health, connection info, and session statistics.",
-        inputSchema={
-            "type": "object",
-            "properties": {},
-        },
-    ),
-    Tool(
         name="opencode_abort",
         description="Abort a running session. Use when a prompt is taking too long or needs to be cancelled.",
         inputSchema={
@@ -190,11 +181,6 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 )
                 # Add model to result for visibility
                 result.model = model
-
-        # Other tools still use serve_handler
-        elif name == "opencode_status":
-            serve_handler = await get_or_create_serve_handler()
-            result = await serve_handler.get_serve_status()
 
         elif name == "opencode_abort":
             serve_handler = await get_or_create_serve_handler()
