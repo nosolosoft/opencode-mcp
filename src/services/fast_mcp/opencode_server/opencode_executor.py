@@ -265,7 +265,7 @@ class OpenCodeExecutor:
         Note: Message is placed LAST in args to follow CLI best practices
         and avoid issues with prompts starting with '-'.
         """
-        args = ["run"]
+        args = ["run", "--format", "json"]  # Force JSON Lines output for parsing
 
         # Add optional flags FIRST
         if model:
@@ -308,7 +308,7 @@ class OpenCodeExecutor:
         If opencode serve is running, uses --attach to connect to it
         and avoid port conflicts.
         """
-        args = ["run"]
+        args = ["run", "--format", "json"]  # Force JSON Lines output for parsing
 
         # Check if serve is running and attach to it to avoid port conflicts
         if await self._is_serve_running():

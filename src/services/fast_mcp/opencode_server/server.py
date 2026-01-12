@@ -22,6 +22,8 @@ from .handlers import (
     ServeHandler,
     get_serve_handler,
 )
+from .handlers.execution import ExecutionHandler
+from .opencode_executor import OpenCodeExecutor
 
 # Configure logging to stderr (never stdout for MCP)
 logging.basicConfig(
@@ -152,29 +154,47 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
 
     try:
         result: OpenCodeResult
-        serve_handler = await get_or_create_serve_handler()
 
         if name == "opencode_prompt":
-            result = await serve_handler.prompt(
-                message=arguments["message"],
-                directory=arguments.get("directory"),
-                session_id=arguments.get("session_id"),
-                model=arguments.get("model"),
-                timeout=arguments.get("timeout", 300),
-            )
+            # Use CLI instead of serve API for better model support
+            execution_handler = ExecutionHandler(OpenCodeExecutor())
 
+            # Map parameters to CLI format
+            model = arguments.get("model") or settings.opencode_default_model
+            session_id = arguments.get("session_id")
+
+            if session_id:
+                # Continue existing session
+                result = await execution_handler.continue_session(
+                    session_id=session_id,
+                    message=arguments.get("message"),
+                    timeout=arguments.get("timeout", 300),
+                )
+            else:
+                # New session
+                result = await execution_handler.run(
+                    message=arguments["message"],
+                    model=model,
+                    timeout=arguments.get("timeout", 300),
+                )
+
+        # Other tools still use serve_handler
         elif name == "opencode_status":
+            serve_handler = await get_or_create_serve_handler()
             result = await serve_handler.get_serve_status()
 
         elif name == "opencode_abort":
+            serve_handler = await get_or_create_serve_handler()
             result = await serve_handler.abort_session(
                 session_id=arguments["session_id"],
             )
 
         elif name == "opencode_list_models":
+            serve_handler = await get_or_create_serve_handler()
             result = await serve_handler.get_providers()
 
         elif name == "opencode_list_sessions":
+            serve_handler = await get_or_create_serve_handler()
             result = await serve_handler.list_sessions()
 
         else:
