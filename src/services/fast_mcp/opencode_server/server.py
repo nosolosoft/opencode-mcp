@@ -85,8 +85,8 @@ TOOLS = [
                 },
                 "timeout": {
                     "type": "number",
-                    "default": 300,
-                    "description": "Timeout in seconds (default: 300)",
+                    "default": 600,
+                    "description": "Timeout in seconds (default: 600)",
                 },
             },
             "required": ["message"],
@@ -154,7 +154,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 result = await execution_handler.continue_session(
                     session_id=session_id,
                     message=arguments.get("message"),
-                    timeout=arguments.get("timeout", 300),
+                    timeout=arguments.get("timeout", settings.default_timeout),
                 )
                 # Sessions continue with their original model (not changeable)
                 result.model = f"(session continues with original model)"
@@ -163,7 +163,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 result = await execution_handler.run(
                     message=arguments["message"],
                     model=model,
-                    timeout=arguments.get("timeout", 300),
+                    timeout=arguments.get("timeout", settings.default_timeout),
                 )
                 # Add model to result for visibility
                 result.model = model

@@ -44,7 +44,7 @@ class OpenCodeRunRequest(BaseModel):
     files: Optional[List[str]] = Field(
         default=None, description="Files to attach to message"
     )
-    timeout: int = Field(default=300, description="Timeout in seconds")
+    timeout: int = Field(default=600, description="Timeout in seconds")
 
 
 class OpenCodeContinueRequest(BaseModel):
@@ -54,7 +54,7 @@ class OpenCodeContinueRequest(BaseModel):
     message: Optional[str] = Field(
         default=None, description="Optional follow-up message"
     )
-    timeout: int = Field(default=300, description="Timeout in seconds")
+    timeout: int = Field(default=600, description="Timeout in seconds")
 
 
 class OpenCodeExecuteRequest(BaseModel):
@@ -71,7 +71,7 @@ class OpenCodeExecuteRequest(BaseModel):
     continue_session: bool = Field(
         default=False, description="Whether to continue last session"
     )
-    timeout: int = Field(default=300, description="Timeout in seconds")
+    timeout: int = Field(default=600, description="Timeout in seconds")
 
 
 class OpenCodeModelsRequest(BaseModel):

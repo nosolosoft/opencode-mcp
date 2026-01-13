@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     opencode_default_agent: Optional[str] = None
 
     # Timeout Configuration
-    default_timeout: int = 300  # 5 minutes
-    max_timeout: int = 600  # 10 minutes
+    default_timeout: int = 600  # 10 minutes
+    max_timeout: int = 1800  # 30 minutes
 
     # Server Configuration
     server_log_level: str = "INFO"

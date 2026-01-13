@@ -5,7 +5,7 @@
       "args": ["-m", "src.services.fast_mcp.opencode_server"],
       "cwd": "/home/manu/IA/opencode-mcp",
       "env": {
-        "OPENCODE_DEFAULT_TIMEOUT": "300",
+        "OPENCODE_DEFAULT_TIMEOUT": "600",
         "OPENCODE_SERVER_LOG_LEVEL": "INFO",
         "OPENCODE_COMMAND": "opencode"
       }

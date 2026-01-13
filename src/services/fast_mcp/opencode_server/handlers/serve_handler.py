@@ -54,7 +54,7 @@ class ServeHandler:
         default_directory: Optional[str] = None,
         auto_start_server: bool = False,
         auto_approve_permissions: bool = True,
-        default_timeout: float = 300.0,
+        default_timeout: float = 600.0,
     ):
         """
         Initialize the serve handler.
