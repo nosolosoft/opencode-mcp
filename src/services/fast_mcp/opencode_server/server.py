@@ -92,7 +92,9 @@ TOOLS = [
                     "type": "number",
                     "default": 25000,
                     "description": "Maximum number of tokens for the model's response (default: 25000). "
-                    "This is a soft limit implemented via prompt instruction.",
+                    "This is a soft limit enforced through enhanced prompt instructions with emphasis, "
+                    "consequences, and strategic guidance. The instruction adapts based on token range "
+                    "for optimal compliance. Note: This is not a hard API limit.",
                 },
                 "variant": {
                     "type": "string",

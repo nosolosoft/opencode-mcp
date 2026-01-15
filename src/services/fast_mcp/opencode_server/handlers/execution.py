@@ -12,6 +12,62 @@ from ..models import OpenCodeResult
 logger = logging.getLogger(__name__)
 
 
+def construct_token_limited_prompt(message: str, max_tokens: int) -> str:
+    """
+    Construct a prompt with effective token limit instruction.
+
+    Uses multi-level emphasis, consequences, and contextual cues
+    to encourage models to respect the token limit.
+
+    Adapts instruction based on token range:
+    - Low (<2000): CRITICAL emphasis, very strict
+    - Medium (2000-10000): IMPORTANT, balanced
+    - High (>10000): Soft guidance
+
+    Args:
+        message: Original user message
+        max_tokens: Maximum output tokens allowed
+
+    Returns:
+        Modified message with token limit instructions
+    """
+    # Determine instruction level based on token range
+    if max_tokens < 2000:
+        # Low range: Critical emphasis
+        header = (
+            f"CRITICAL TOKEN LIMIT: Your response MUST NOT exceed {max_tokens} tokens. This is a HARD limit.\n"
+            f"- Responses exceeding this limit will be rejected\n"
+            f"- Be extremely concise and direct\n"
+            f"- Prioritize key information only\n"
+            f"- Avoid examples, explanations or elaborations unless explicitly requested\n"
+        )
+        footer = f"\nREMINDER: Maximum {max_tokens} tokens. Keep your response brief and focused."
+
+    elif max_tokens <= 10000:
+        # Medium range: Important but balanced
+        header = (
+            f"IMPORTANT TOKEN CONSTRAINT: Your response must stay within {max_tokens} tokens.\n"
+            f"- Responses exceeding this limit will be truncated\n"
+            f"- Be concise but complete\n"
+            f"- Structure your response for clarity\n"
+            f"- Avoid unnecessary verbosity\n"
+        )
+        footer = f"\nREMINDER: Stay within {max_tokens} tokens total."
+
+    else:
+        # High range: Soft guidance
+        header = (
+            f"TOKEN BUDGET: Please limit your response to approximately {max_tokens} tokens.\n"
+            f"- Long responses will be truncated\n"
+            f"- Structure your answer efficiently\n"
+            f"- Focus on essential information\n"
+        )
+        footer = f"\nREMINDER: Target limit is {max_tokens} tokens."
+
+    # Construct final prompt with header + message + footer
+    return f"{header}\n{message}{footer}"
+
+
 class ExecutionHandler:
     """Handler for OpenCode execution operations."""
 
@@ -45,13 +101,10 @@ class ExecutionHandler:
         """
         logger.info(f"Running OpenCode with message: {message[:100]}...")
 
-        # Apply soft token limit via prompt instruction
+        # Apply soft token limit via improved prompt instruction
         if max_output_tokens:
-            modified_message = (
-                f"IMPORTANT: Limit your response to a maximum of {max_output_tokens} tokens.\n\n"
-                f"{message}"
-            )
-            logger.info(f"Applying soft token limit: {max_output_tokens}")
+            modified_message = construct_token_limited_prompt(message, max_output_tokens)
+            logger.info(f"Applying improved token limit: {max_output_tokens}")
         else:
             modified_message = message
 
@@ -95,11 +148,8 @@ class ExecutionHandler:
         # Apply soft token limit if message provided
         modified_message = message
         if message and max_output_tokens:
-            modified_message = (
-                f"IMPORTANT: Limit your response to a maximum of {max_output_tokens} tokens.\n\n"
-                f"{message}"
-            )
-            logger.info(f"Applying soft token limit to session: {max_output_tokens}")
+            modified_message = construct_token_limited_prompt(message, max_output_tokens)
+            logger.info(f"Applying improved token limit to session: {max_output_tokens}")
 
         result = await self.executor.continue_session(
             session_id=session_id,
