@@ -26,6 +26,7 @@ class ExecutionHandler:
         files: Optional[List[str]] = None,
         timeout: Optional[int] = None,
         max_output_tokens: Optional[int] = None,
+        variant: Optional[str] = None,
     ) -> OpenCodeResult:
         """
         Run OpenCode with a prompt.
@@ -37,6 +38,7 @@ class ExecutionHandler:
             files: Optional list of files to attach
             timeout: Optional timeout in seconds
             max_output_tokens: Optional maximum tokens for response (soft limit)
+            variant: Optional model variant (minimal/low/medium/high) for Gemini models
 
         Returns:
             OpenCodeResult with execution results
@@ -59,6 +61,7 @@ class ExecutionHandler:
             agent=agent,
             files=files,
             timeout=timeout,
+            variant=variant,
         )
 
         if result.success:

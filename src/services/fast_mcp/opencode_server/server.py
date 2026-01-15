@@ -94,6 +94,15 @@ TOOLS = [
                     "description": "Maximum number of tokens for the model's response (default: 25000). "
                     "This is a soft limit implemented via prompt instruction.",
                 },
+                "variant": {
+                    "type": "string",
+                    "description": "Optional model variant for Gemini models to control reasoning level. "
+                    "Options: 'minimal', 'low', 'medium' (default), 'high'. "
+                    "Use 'high' for complex analysis and deep reasoning, 'low' for simple queries, "
+                    "'medium' for standard tasks. If not specified, defaults to 'medium'. "
+                    "Only applies to google/antigravity-gemini-* models.",
+                    "enum": ["minimal", "low", "medium", "high"],
+                },
             },
             "required": ["message"],
         },
@@ -175,6 +184,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                     model=model,
                     timeout=arguments.get("timeout", settings.default_timeout),
                     max_output_tokens=max_output_tokens,
+                    variant=arguments.get("variant"),
                 )
                 # Add model to result for visibility
                 result.model = model

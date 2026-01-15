@@ -251,6 +251,7 @@ class OpenCodeExecutor:
         agent: Optional[str] = None,
         files: Optional[List[str]] = None,
         timeout: Optional[int] = None,
+        variant: Optional[str] = None,
     ) -> OpenCodeResult:
         """
         Run OpenCode with a prompt message.
@@ -261,6 +262,7 @@ class OpenCodeExecutor:
             agent: Optional agent to use
             files: Optional list of files to attach
             timeout: Optional timeout in seconds
+            variant: Optional model variant (minimal/low/medium/high) for Gemini models
 
         Note: Message is placed LAST in args to follow CLI best practices
         and avoid issues with prompts starting with '-'.
@@ -272,6 +274,8 @@ class OpenCodeExecutor:
             args.extend(["--model", model])
         if agent:
             args.extend(["--agent", agent])
+        if variant:
+            args.extend(["--variant", variant])
         if files:
             for f in files:
                 args.extend(["-f", f])
