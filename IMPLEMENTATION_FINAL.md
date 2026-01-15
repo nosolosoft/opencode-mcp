@@ -129,7 +129,7 @@ mcp__opencode__opencode_prompt(message="Saluda")
 # ✅ SUCCESS: Funciona con glm-4.7
 
 # Con modelo específico
-mcp__opencode__opencode_prompt(message="Saluda", model="google/gemini-3-flash-preview")
+mcp__opencode__opencode_prompt(message="Saluda", model="google/antigravity-gemini-3-flash")
 # ❌ ERROR: Modelo no soportado por OpenCode serve
 # → Comportamiento esperado (modelo no existe en serve)
 ```
@@ -141,7 +141,7 @@ mcp__opencode__opencode_prompt(message="Saluda", model="google/gemini-3-flash-pr
 ## 📝 Descubrimientos
 
 ### OpenCode Serve vs CLI
-- **CLI**: Soporta `google/gemini-3-flash-preview` (lista en `opencode models`)
+- **CLI**: Soporta `google/antigravity-gemini-3-flash` (lista en `opencode models`)
 - **Serve API**: NO soporta ese modelo (retorna 200 + body vacío)
 - **Default serve**: Usa `glm-4.7` (zai-coding-plan provider)
 

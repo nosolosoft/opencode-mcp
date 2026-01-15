@@ -17,11 +17,18 @@ Basado en el Principio 5: Forzar al modelo a mostrar reglas en cada respuesta cr
     <principle_5>Mostrar core_principles verbatim al inicio de CADA respuesta</principle_5>
   </core_principles>
 
-  <routing_strategy context="model_selection">
-    <rule priority="critical">Claude solo para decisiones arquitectónicas críticas (5%)</rule>
-    <rule priority="high">Codex para tareas de código complejas (50%)</rule>
-    <rule priority="medium">Gemini Flash para consultas simples (30%)</rule>
-    <rule priority="medium">Droid para terminal ops, migrations, y reasoning alternativo (15%)</rule>
+  <routing_strategy context="model_selection_v4_ene2026_opencode">
+    <rule priority="critical">Opus 4.5 Thinking vía OpenCode - DEFAULT, implementación, decisiones críticas (40%)</rule>
+    <rule priority="high">Gemini 3 Flash vía OpenCode - Investigación, análisis READ-ONLY (30%)</rule>
+    <rule priority="medium">Codex vía OpenCode - Matemáticas, código COMPLEJO (20%)</rule>
+    <rule priority="low">Claude nativo - Solo orquestación (10%)</rule>
+
+    <complexity_router>
+      <simple>google/antigravity-gemini-3-flash</simple>
+      <medium>google/antigravity-gemini-3-pro</medium>
+      <complex>openai/gpt-5.2-codex</complex>
+      <critical>google/antigravity-claude-opus-4-5-thinking</critical>
+    </complexity_router>
   </routing_strategy>
 
   <memory_persistence>
@@ -80,11 +87,11 @@ Basado en el Principio 5: Forzar al modelo a mostrar reglas en cada respuesta cr
 - **Tools**: `mcp__memory__*` (create_entities, create_relations, add_observations, search_nodes, etc.)
 - **Purpose**: Persistent knowledge management across sessions
 
-**Codex MCP** - Code Execution & Generation
+**Codex MCP (DEPRECATED)** - Code Execution & Generation
 - **Tools**: `mcp__codex__codex`, `mcp__codex__codex-reply`
 - **Purpose**: Autonomous code generation and execution workflows
 
-**Gemini MCP** - Analysis & Documentation
+**Gemini MCP (DEPRECATED)** - Analysis & Documentation
 - **Tools**: `mcp__gemini-mcp__gemini_pro`, `mcp__gemini-mcp__gemini_flash`, `mcp__gemini-mcp__gemini_analyze`
 - **Purpose**: Large context analysis, comprehensive documentation
 
@@ -108,7 +115,7 @@ Además de los MCP servers, se puede usar CLI directo via skill `delegacion` par
 | CLI | Comando | Default Model | Cuándo Usar |
 |-----|---------|---------------|-------------|
 | OpenCode | `opencode run -m MODEL "PROMPT"` | glm-4.7 | Background tasks, paralelo |
-| Gemini | `gemini --model MODEL --yolo "PROMPT"` | gemini-3-pro-preview | Análisis largo, fire-and-forget |
+| Gemini | `gemini --model MODEL --yolo "PROMPT"` | google/antigravity-gemini-3-pro | Análisis largo, fire-and-forget |
 | Codex | `codex exec -m MODEL --dangerously-bypass-approvals-and-sandbox "PROMPT"` | gpt-5.1-codex-max | Implementación larga |
 | Claude | `claude -p --model MODEL --dangerously-skip-permissions "PROMPT"` | opus | Decisiones delegadas |
 
@@ -132,34 +139,29 @@ CLI (background): Usuario puede seguir con otra cosa mientras se ejecuta
 
 **Nota**: Los CLIs se ejecutan via `Bash(command="...", run_in_background=true)`. Monitorear con `/tasks`.
 
-## 🎯 ROUTING INTELIGENTE CODEX-CÉNTRICO (90% Reducción Claude)
+## 🎯 ROUTING INTELIGENTE 40-30-20-10 (90% Reducción Claude)
 
 ### Matriz de Distribución Optimizada
-**Distribución 50-30-15-5 para máxima eficiencia:**
-- **50% Codex** - Autonomous coding tasks, multiple iterations, implementation activa
-- **30% Gemini** - Large context analysis, documentation, comprehensive explanations
-- **15% Droid** - Terminal ops, migrations, reasoning alternativo, bash automation
-- **5% Claude** - Critical architectural decisions únicamente
+**Distribución 40-30-20-10 para máxima eficiencia:**
+- **40% Opus 4.5** - DEFAULT, implementación, decisiones críticas
+- **30% Gemini 3** - Investigación, análisis READ-ONLY
+- **20% Codex** - Matemáticas, código COMPLEJO
+- **10% Claude nativo** - Solo orquestación
 
 ### Disparadores Automáticos Inteligentes
 ```markdown
-**Implementación y Código (50% Codex):**
-- "implementa", "crea", "desarrolla", "codifica", "refactoriza" → mcp__codex__codex
-- "escribe código", "genera función", "desarrolla API" → mcp__codex__codex
-- "autonomous coding", "multiple iterations" → mcp__codex__codex-reply
+**Implementación y Código (40% Opus 4.5):**
+- "implementa", "crea", "desarrolla", "codifica", "refactoriza" → Opus 4.5
+- "escribe código", "genera función", "desarrolla API" → Opus 4.5
 
-**Análisis y Documentación (30% Gemini):**
-- "analiza", "explica", "documenta", "explica detalladamente" → mcp__gemini-mcp__gemini_pro
-- "large context", "comprehensive analysis", "deep dive" → mcp__gemini-mcp__gemini_analyze
-- "explica simple", "resume" → mcp__gemini-mcp__gemini_flash
+**Análisis e Investigación (30% Gemini 3):**
+- "analiza", "explica", "documenta", "investiga" → Gemini 3
+- "large context", "comprehensive analysis", "read-only" → Gemini 3
 
-**Terminal Operations, Migrations y Reasoning (15% Droid):**
-- "terminal", "bash", "CLI", "script", "automation" → mcp__droid-cli__execute_droid_command
-- "migration", "enterprise", "tooling", "deployment" → mcp__droid-cli__execute_droid_command
-- "razona", "diseña", "optimiza", "perspectiva diferente" → mcp__droid-cli__execute_droid_command
+**Matemáticas y Algoritmos (20% Codex):**
+- "matemáticas", "algoritmos complejos", "optimización" → Codex
 
-**Decisiones Críticas (5% Claude):**
-- "crítico", "arquitectura", "decisión estratégica", "seguridad crítica" → Claude nativo
+**Orquestación (10% Claude nativo):**
 - "final validation", "architectural decision", "security critical" → Claude nativo
 ```
 
@@ -257,10 +259,10 @@ CLI (background): Usuario puede seguir con otra cosa mientras se ejecuta
     "reasoning": "mcp__droid-cli__execute_droid_command",
     "critical": "claude-native",
     "distribution": {
-      "codex": 50,
-      "gemini": 30,
-      "droid": 15,
-      "claude": 5
+      "opus_4_5": 40,
+      "gemini_3": 30,
+      "codex": 20,
+      "claude_native": 10
     }
   }
 }
@@ -268,8 +270,8 @@ CLI (background): Usuario puede seguir con otra cosa mientras se ejecuta
 
 ### Métricas de Routing
 - **Cost Efficiency**: >85% reducción vs baseline Claude
-- **Autonomous Coding**: >80% tareas implementadas por Codex sin intervención
-- **Speed Improvement**: Codex multiple iterations = desarrollo más rápido
+- **Autonomous Coding**: >80% tareas implementadas por Opus/Codex sin intervención
+- **Speed Improvement**: OpenCode multiple models = desarrollo más rápido
 - **Quality Maintenance**: 95% con Claude solo en validación final
 
 ## 🔄 Background Task Management
@@ -293,19 +295,18 @@ For long-running operations, use `run_in_background: true` parameter:
 
 ## 🚀 Quick Start Workflow
 
-1. **For code implementation**: Use Codex MCP for multi-step coding tasks
+1. **For code implementation**: Use OpenCode (Opus 4.5) for multi-step coding tasks
 2. **For testing**: Run `pytest tests/` or project-specific test commands
 3. **For memory operations**: Use MCP memory tools for persistence
-4. **For terminal operations**: Use Droid MCP for bash automation, migrations, enterprise tooling
-5. **For autonomous coding**: Use Codex MCP for multi-step workflows
-6. **For analysis**: Use Gemini MCP for large context processing
+4. **For terminal operations**: Use OpenCode for bash automation, migrations
+5. **For analysis**: Use Gemini 3 for large context processing
 
 ## 🤖 SISTEMA AUTÓNOMO DE METAS (MODO BYPASS)
 
 ### Protocolo de Activación Automática
 Cuando se detecta "bypass permissions on" + meta compleja:
 1. **Descomposición automática** de la meta en subtareas medibles
-2. **Asignación inteligente** de cada subtarea según matriz routing 50-30-15-5
+2. **Asignación inteligente** de cada subtarea según matriz routing 40-30-20-10
 3. **Ejecución autónoma** con bucle iterativo de verificación
 4. **Optimización continua** basada en éxito/fracaso
 5. **Documentación automática** para auditoría completa
@@ -320,7 +321,7 @@ Cuando se detecta "bypass permissions on" + meta compleja:
   </goal_decomposition>
 
   <task_execution>
-    <step_1>Para cada subtarea: seleccionar MCP apropiado</step_1>
+    <step_1>Para cada subtarea: seleccionar modelo apropiado</step_1>
     <step_2>Ejecutar con verificación continua</step_2>
     <step_3>Si fallo: re-analizar y re-ejecutar</step_3>
     <step_4>Si éxito: continuar siguiente subtarea</step_4>
@@ -344,13 +345,13 @@ Cuando se detecta "bypass permissions on" + meta compleja:
 **Meta**: "Migrar sistema auth a JWT con refresh tokens"
 
 **Ejecución autónoma:**
-1. **Subtarea 1**: Analizar sistema actual → **Routing**: Gemini (30%)
+1. **Subtarea 1**: Analizar sistema actual → **Routing**: Gemini 3 (30%)
 2. **Verificación**: ¿Entendido 100%? → **Sí** → Continuar
-3. **Subtarea 2**: Diseñar schema JWT → **Routing**: Droid (15%)
+3. **Subtarea 2**: Diseñar schema JWT → **Routing**: Opus 4.5 (40%)
 4. **Verificación**: ¿Diseño seguro? → **Sí** → Continuar
-5. **Subtarea 3**: Implementar código → **Routing**: Codex (50%)
+5. **Subtarea 3**: Implementar código → **Routing**: Codex (20%)
 6. **Verificación**: ¿Código funcional? → **Sí** → Continuar
-7. **Subtarea 4**: Validación final → **Routing**: Claude (5%)
+7. **Subtarea 4**: Validación final → **Routing**: Claude nativo (10%)
 8. **Verificación**: ¿Sistema completo? → **Sí** → Meta completada
 
 ### Métricas de Sistema Autónomo
@@ -358,6 +359,7 @@ Cuando se detecta "bypass permissions on" + meta compleja:
 - **Success Rate**: ≥95% calidad en resultados finales
 - **Iteration Efficiency**: Promedio 3-5 iteraciones por subtarea
 - **Cost Optimization**: 85-90% reducción vs baseline Claude
+
 
 ## 🎯 Development Philosophy
 

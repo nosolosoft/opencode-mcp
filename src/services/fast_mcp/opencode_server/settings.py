@@ -12,12 +12,17 @@ class Settings(BaseSettings):
 
     # OpenCode CLI Configuration
     opencode_command: str = "opencode"
-    opencode_default_model: Optional[str] = "google/antigravity-claude-opus-4-5-thinking"
+    opencode_default_model: Optional[str] = (
+        "google/antigravity-claude-opus-4-5-thinking"
+    )
     opencode_default_agent: Optional[str] = None
 
     # Timeout Configuration
     default_timeout: int = 600  # 10 minutes
     max_timeout: int = 1800  # 30 minutes
+
+    # Token limits (soft limit via prompt instruction)
+    default_max_output_tokens: int = 25000  # Default max output tokens
 
     # Server Configuration
     server_log_level: str = "INFO"
@@ -26,16 +31,48 @@ class Settings(BaseSettings):
 
     # Security Configuration
     allowed_operations: List[str] = [
-        "run", "continue", "models", "export", "stats", "version"
+        "run",
+        "continue",
+        "models",
+        "export",
+        "stats",
+        "version",
     ]
 
     # File Configuration
     max_file_size: int = 10 * 1024 * 1024  # 10MB
     allowed_file_extensions: List[str] = [
-        ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".cpp", ".c", ".h",
-        ".go", ".rs", ".rb", ".php", ".swift", ".kt", ".scala", ".cs",
-        ".json", ".yaml", ".yml", ".toml", ".xml", ".html", ".css", ".scss",
-        ".md", ".txt", ".sh", ".bash", ".sql", ".graphql"
+        ".py",
+        ".js",
+        ".ts",
+        ".jsx",
+        ".tsx",
+        ".java",
+        ".cpp",
+        ".c",
+        ".h",
+        ".go",
+        ".rs",
+        ".rb",
+        ".php",
+        ".swift",
+        ".kt",
+        ".scala",
+        ".cs",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".xml",
+        ".html",
+        ".css",
+        ".scss",
+        ".md",
+        ".txt",
+        ".sh",
+        ".bash",
+        ".sql",
+        ".graphql",
     ]
 
     class Config:

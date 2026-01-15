@@ -88,6 +88,12 @@ TOOLS = [
                     "default": 600,
                     "description": "Timeout in seconds (default: 600)",
                 },
+                "max_output_tokens": {
+                    "type": "number",
+                    "default": 25000,
+                    "description": "Maximum number of tokens for the model's response (default: 25000). "
+                    "This is a soft limit implemented via prompt instruction.",
+                },
             },
             "required": ["message"],
         },
@@ -148,6 +154,9 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             # Map parameters to CLI format
             model = arguments.get("model") or settings.opencode_default_model
             session_id = arguments.get("session_id")
+            max_output_tokens = arguments.get(
+                "max_output_tokens", settings.default_max_output_tokens
+            )
 
             if session_id:
                 # Continue existing session
@@ -155,6 +164,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                     session_id=session_id,
                     message=arguments.get("message"),
                     timeout=arguments.get("timeout", settings.default_timeout),
+                    max_output_tokens=max_output_tokens,
                 )
                 # Sessions continue with their original model (not changeable)
                 result.model = f"(session continues with original model)"
@@ -164,6 +174,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                     message=arguments["message"],
                     model=model,
                     timeout=arguments.get("timeout", settings.default_timeout),
+                    max_output_tokens=max_output_tokens,
                 )
                 # Add model to result for visibility
                 result.model = model

@@ -57,7 +57,7 @@ Session: ses_44ea28e49ffeC3SoDYo6qjox9t
 Model: glm-4.7 (zai-coding-plan)
 ```
 
-**Test 2 - Con google/gemini-3-flash-preview**:
+**Test 2 - Con google/antigravity-gemini-3-flash**:
 ```
 ❌ Error: "OpenCode serve returned empty response"
 Session: ses_44e8f6c26ffeGFzphSFIhCp4BX
@@ -65,7 +65,7 @@ Causa: Modelo NO soportado por OpenCode serve
 ```
 
 **Conclusión**:
-- El modelo `google/gemini-3-flash-preview` existe en el CLI pero **NO en OpenCode serve**
+- El modelo `google/antigravity-gemini-3-flash` existe en el CLI pero **NO en OpenCode serve**
 - OpenCode serve retorna 200 + body vacío para modelos no soportados
 - La implementación está correcta y detectaría el problema
 - El MCP server necesita **restart** para cargar el nuevo código
@@ -152,7 +152,7 @@ asyncio.run(test_validation())
 ## 🔍 Notas Adicionales
 
 ### Diferencia CLI vs Serve
-- **OpenCode CLI**: Soporta google/gemini-3-flash-preview
+- **OpenCode CLI**: Soporta google/antigravity-gemini-3-flash
 - **OpenCode serve**: NO soporta ese modelo (retorna 200 vacío)
 - **Solución**: Usar modelos soportados por serve o modelo default (glm-4.7)
 
