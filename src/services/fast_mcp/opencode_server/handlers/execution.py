@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from ..opencode_executor import OpenCodeExecutor
 from ..models import OpenCodeResult
+from ..settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,7 @@ class ExecutionHandler:
         timeout: Optional[int] = None,
         max_output_tokens: Optional[int] = None,
         variant: Optional[str] = None,
+        use_ultrawork: bool = True,
     ) -> OpenCodeResult:
         """
         Run OpenCode with a prompt.
@@ -95,18 +97,24 @@ class ExecutionHandler:
             timeout: Optional timeout in seconds
             max_output_tokens: Optional maximum tokens for response (soft limit)
             variant: Optional model variant (minimal/low/medium/high) for Gemini models
+            use_ultrawork: Enable oh-my-opencode multi-agent orchestration (default: True)
 
         Returns:
             OpenCodeResult with execution results
         """
         logger.info(f"Running OpenCode with message: {message[:100]}...")
 
-        # Apply soft token limit via improved prompt instruction
-        if max_output_tokens:
-            modified_message = construct_token_limited_prompt(message, max_output_tokens)
-            logger.info(f"Applying improved token limit: {max_output_tokens}")
+        # Inject ultrawork keyword for oh-my-opencode multi-agent orchestration
+        if use_ultrawork and settings.ultrawork_enabled:
+            modified_message = f"{settings.ultrawork_keyword} {message}"
+            logger.info(f"Ultrawork enabled: injecting '{settings.ultrawork_keyword}' keyword")
         else:
             modified_message = message
+
+        # Apply soft token limit via improved prompt instruction
+        if max_output_tokens:
+            modified_message = construct_token_limited_prompt(modified_message, max_output_tokens)
+            logger.info(f"Applying improved token limit: {max_output_tokens}")
 
         result = await self.executor.run_prompt(
             message=modified_message,
