@@ -31,6 +31,18 @@ class OpenCodeResult(BaseModel):
     stderr: Optional[str] = Field(
         default=None, description="Stderr output if any"
     )
+    partial: bool = Field(
+        default=False,
+        description="True if the result is partial due to timeout (output captured before kill)",
+    )
+    is_error: bool = Field(
+        default=False,
+        description="True if this result represents an error condition (MCP isError flag)",
+    )
+    retry_count: int = Field(
+        default=0,
+        description="Number of retry attempts made before this result",
+    )
 
 
 class OpenCodeRunRequest(BaseModel):

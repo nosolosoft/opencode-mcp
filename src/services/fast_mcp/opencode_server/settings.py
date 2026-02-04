@@ -3,7 +3,7 @@ OpenCode MCP Server Settings
 Configuration management using Pydantic BaseSettings with environment variables.
 """
 
-from typing import Optional, List
+from typing import Dict, Optional, List
 from pydantic_settings import BaseSettings
 
 
@@ -13,13 +13,26 @@ class Settings(BaseSettings):
     # OpenCode CLI Configuration
     opencode_command: str = "opencode"
     opencode_default_model: Optional[str] = (
-        "google/antigravity-claude-opus-4-5-thinking"
+        "openai/gpt-5.2-codex"
     )
     opencode_default_agent: Optional[str] = None
 
-    # Timeout Configuration
-    default_timeout: int = 600  # 10 minutes
+    # Timeout Configuration (per-operation)
+    default_timeout: int = 600  # 10 minutes - prompts
     max_timeout: int = 1800  # 30 minutes
+    timeout_list_models: int = 30  # 30s for listing models
+    timeout_list_sessions: int = 30  # 30s for listing sessions
+    timeout_health: int = 15  # 15s for health checks
+    timeout_buffer: int = 30  # Buffer between subprocess and MCP timeout
+
+    # Retry Configuration
+    retry_max_attempts: int = 2  # Max retry attempts (0 = no retries)
+    retry_backoff_factor: float = 1.5  # Exponential backoff multiplier
+    retry_on_timeout: bool = True  # Retry on timeout errors
+
+    # Model Registry Configuration
+    model_cache_ttl: int = 300  # 5 min cache TTL for model list
+    model_extra_aliases: Dict[str, str] = {}  # Additional user-defined aliases
 
     # Token limits (soft limit via prompt instruction)
     default_max_output_tokens: int = 25000  # Default max output tokens
@@ -27,7 +40,7 @@ class Settings(BaseSettings):
     # Server Configuration
     server_log_level: str = "INFO"
     mcp_server_name: str = "opencode-mcp"
-    mcp_server_version: str = "1.0.0"
+    mcp_server_version: str = "2.0.0"
 
     # Security Configuration
     allowed_operations: List[str] = [
@@ -38,6 +51,10 @@ class Settings(BaseSettings):
         "stats",
         "version",
     ]
+
+    # oh-my-opencode Integration
+    ultrawork_enabled: bool = True  # Auto-inject ultrawork keyword for multi-agent orchestration
+    ultrawork_keyword: str = "ulw"  # Keyword to inject (ulw = ultrawork shorthand)
 
     # File Configuration
     max_file_size: int = 10 * 1024 * 1024  # 10MB

@@ -24,10 +24,10 @@ Basado en el Principio 5: Forzar al modelo a mostrar reglas en cada respuesta cr
     <rule priority="low">Claude nativo - Solo orquestación (10%)</rule>
 
     <complexity_router>
-      <simple>google/antigravity-gemini-3-flash</simple>
-      <medium>google/antigravity-gemini-3-pro</medium>
+      <simple>google/gemini-3-flash-preview</simple>
+      <medium>google/gemini-3-pro-preview</medium>
       <complex>openai/gpt-5.2-codex</complex>
-      <critical>google/antigravity-claude-opus-4-5-thinking</critical>
+      <critical>openai/gpt-5.2-codex</critical>
     </complexity_router>
   </routing_strategy>
 
@@ -115,7 +115,7 @@ Además de los MCP servers, se puede usar CLI directo via skill `delegacion` par
 | CLI | Comando | Default Model | Cuándo Usar |
 |-----|---------|---------------|-------------|
 | OpenCode | `opencode run -m MODEL "PROMPT"` | glm-4.7 | Background tasks, paralelo |
-| Gemini | `gemini --model MODEL --yolo "PROMPT"` | google/antigravity-gemini-3-pro | Análisis largo, fire-and-forget |
+| Gemini | `gemini --model MODEL --yolo "PROMPT"` | google/gemini-3-pro-preview | Análisis largo, fire-and-forget |
 | Codex | `codex exec -m MODEL --dangerously-bypass-approvals-and-sandbox "PROMPT"` | gpt-5.1-codex-max | Implementación larga |
 | Claude | `claude -p --model MODEL --dangerously-skip-permissions "PROMPT"` | opus | Decisiones delegadas |
 
