@@ -456,3 +456,58 @@ class ErrorResponse(BaseModel):
     error: str = Field(description="Error message")
     code: Optional[str] = Field(default=None, description="Error code")
     details: Optional[Dict[str, Any]] = Field(default=None, description="Additional details")
+
+
+# =============================================================================
+# Search & File API Models (Serve API endpoints)
+# =============================================================================
+
+class FindTextSubmatch(BaseModel):
+    """Submatch within a ripgrep text match."""
+    match: Dict[str, str] = Field(description="Match text object with 'text' key")
+    start: int = Field(description="Start offset within the line")
+    end: int = Field(description="End offset within the line")
+
+
+class FindTextMatch(BaseModel):
+    """Single match from ripgrep text search (/find endpoint)."""
+    path: Dict[str, str] = Field(description="File path object with 'text' key")
+    lines: Dict[str, str] = Field(description="Matched line(s) with 'text' key")
+    line_number: int = Field(description="Line number of the match")
+    absolute_offset: int = Field(description="Absolute byte offset in file")
+    submatches: List[FindTextSubmatch] = Field(
+        default_factory=list, description="Submatch details"
+    )
+
+    class Config:
+        extra = "allow"
+
+
+class FileContentResponse(BaseModel):
+    """Response from /file/content endpoint."""
+    type: str = Field(description="Content type: 'text' or 'binary'")
+    content: str = Field(description="File content (text) or base64 (binary)")
+    diff: Optional[str] = Field(default=None, description="Git diff if modified")
+    patch: Optional[Dict[str, Any]] = Field(default=None, description="Parsed patch hunks")
+    encoding: Optional[str] = Field(default=None, description="Encoding (e.g., 'base64' for binary)")
+    mimeType: Optional[str] = Field(default=None, description="MIME type for binary files")
+
+    class Config:
+        extra = "allow"
+
+
+class FileNode(BaseModel):
+    """Directory entry from /file endpoint."""
+    name: str = Field(description="File or directory name")
+    path: str = Field(description="Relative path")
+    absolute: str = Field(description="Absolute path")
+    type: str = Field(description="'file' or 'directory'")
+    ignored: bool = Field(description="Whether the entry is gitignored")
+
+
+class FileStatusEntry(BaseModel):
+    """Git file status from /file/status endpoint."""
+    path: str = Field(description="Relative file path")
+    added: int = Field(description="Lines added")
+    removed: int = Field(description="Lines removed")
+    status: str = Field(description="Git status: 'added', 'deleted', or 'modified'")

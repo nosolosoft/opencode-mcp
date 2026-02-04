@@ -30,6 +30,10 @@ from .models import (
     ErrorResponse,
     SSEEvent,
     EventBase,
+    FindTextMatch,
+    FileContentResponse,
+    FileNode,
+    FileStatusEntry,
 )
 
 logger = logging.getLogger(__name__)
@@ -813,6 +817,240 @@ class OpenCodeServeClient:
         response.raise_for_status()
         data = await self._parse_json_response(response, f"/session/{session_id}/fork")
         return Session.model_validate(data)
+
+
+    # =========================================================================
+    # Search & File Operations (Serve API endpoints)
+    # =========================================================================
+
+    async def _request_with_retry(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: Optional[Dict[str, Any]] = None,
+        timeout: float = 30.0,
+        max_retries: int = 3,
+        retry_delays: tuple = (0.1, 0.5, 1.0),
+    ) -> httpx.Response:
+        """
+        Make an HTTP request with retry for transient errors.
+
+        Retries on: ConnectError, ReadTimeout, HTTP 503.
+        Does NOT retry on: 404, 400, auth errors.
+
+        Args:
+            method: HTTP method
+            url: URL path
+            params: Query parameters
+            timeout: Request timeout in seconds
+            max_retries: Maximum retry attempts
+            retry_delays: Delay between retries (seconds)
+
+        Returns:
+            httpx.Response
+
+        Raises:
+            httpx.HTTPStatusError: For non-retryable HTTP errors
+            ServerNotRunningError: If server is unreachable after retries
+        """
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                response = await self.client.request(
+                    method,
+                    url,
+                    params=params,
+                    timeout=httpx.Timeout(timeout, connect=self.CONNECT_TIMEOUT),
+                )
+                # Retry on 503 (service unavailable)
+                if response.status_code == 503:
+                    last_error = OpenCodeServeError(
+                        f"Server returned 503 on {url}", status_code=503
+                    )
+                    if attempt < max_retries - 1:
+                        delay = retry_delays[min(attempt, len(retry_delays) - 1)]
+                        logger.warning(
+                            f"HTTP 503 on {url}, retry {attempt + 1}/{max_retries} in {delay}s"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    response.raise_for_status()
+
+                return response
+
+            except httpx.ConnectError as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    delay = retry_delays[min(attempt, len(retry_delays) - 1)]
+                    logger.warning(
+                        f"ConnectError on {url}, retry {attempt + 1}/{max_retries} in {delay}s"
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    raise ServerNotRunningError(
+                        f"Cannot connect to OpenCode serve at {self.base_url} after {max_retries} attempts"
+                    ) from e
+
+            except httpx.ReadTimeout as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    delay = retry_delays[min(attempt, len(retry_delays) - 1)]
+                    logger.warning(
+                        f"ReadTimeout on {url}, retry {attempt + 1}/{max_retries} in {delay}s"
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    raise
+
+        # Should not reach here, but just in case
+        raise last_error  # type: ignore[misc]
+
+    async def find_text(
+        self,
+        pattern: str,
+        directory: Optional[str] = None,
+        timeout: float = 45.0,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for text patterns across files using ripgrep.
+
+        Args:
+            pattern: Regex pattern to search for
+            directory: Working directory (project root)
+            timeout: Request timeout in seconds
+
+        Returns:
+            List of match dicts with path, lines, line_number, etc.
+        """
+        params: Dict[str, Any] = {"pattern": pattern}
+        dir_to_use = directory or self.directory
+        if dir_to_use:
+            params["directory"] = dir_to_use
+
+        response = await self._request_with_retry(
+            "GET", "/find", params=params, timeout=timeout
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def find_files(
+        self,
+        query: str,
+        directory: Optional[str] = None,
+        file_type: Optional[str] = None,
+        limit: Optional[int] = None,
+        timeout: float = 30.0,
+    ) -> List[str]:
+        """
+        Search for files by name or pattern.
+
+        Args:
+            query: File name pattern to search for
+            directory: Working directory (project root)
+            file_type: Filter by type: 'file' or 'directory'
+            limit: Maximum number of results (1-200)
+            timeout: Request timeout in seconds
+
+        Returns:
+            List of matching file paths
+        """
+        params: Dict[str, Any] = {"query": query}
+        dir_to_use = directory or self.directory
+        if dir_to_use:
+            params["directory"] = dir_to_use
+        if file_type:
+            params["type"] = file_type
+        if limit is not None:
+            params["limit"] = min(limit, 200)
+
+        response = await self._request_with_retry(
+            "GET", "/find/file", params=params, timeout=timeout
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def read_file(
+        self,
+        path: str,
+        directory: Optional[str] = None,
+        timeout: float = 15.0,
+    ) -> Dict[str, Any]:
+        """
+        Read file content.
+
+        Args:
+            path: File path (relative to project root)
+            directory: Working directory (project root)
+            timeout: Request timeout in seconds
+
+        Returns:
+            Dict with type, content, and optional diff/patch info
+        """
+        params: Dict[str, Any] = {"path": path}
+        dir_to_use = directory or self.directory
+        if dir_to_use:
+            params["directory"] = dir_to_use
+
+        response = await self._request_with_retry(
+            "GET", "/file/content", params=params, timeout=timeout
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def list_directory(
+        self,
+        path: str = ".",
+        directory: Optional[str] = None,
+        timeout: float = 15.0,
+    ) -> List[Dict[str, Any]]:
+        """
+        List files and directories at a path.
+
+        Args:
+            path: Directory path to list (relative to project root)
+            directory: Working directory (project root)
+            timeout: Request timeout in seconds
+
+        Returns:
+            List of FileNode dicts (name, path, absolute, type, ignored)
+        """
+        params: Dict[str, Any] = {"path": path}
+        dir_to_use = directory or self.directory
+        if dir_to_use:
+            params["directory"] = dir_to_use
+
+        response = await self._request_with_retry(
+            "GET", "/file", params=params, timeout=timeout
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def file_status(
+        self,
+        directory: Optional[str] = None,
+        timeout: float = 10.0,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get git status of all modified files.
+
+        Args:
+            directory: Working directory (project root)
+            timeout: Request timeout in seconds
+
+        Returns:
+            List of FileStatusEntry dicts (path, status, added, removed)
+        """
+        params: Dict[str, Any] = {}
+        dir_to_use = directory or self.directory
+        if dir_to_use:
+            params["directory"] = dir_to_use
+
+        response = await self._request_with_retry(
+            "GET", "/file/status", params=params, timeout=timeout
+        )
+        response.raise_for_status()
+        return response.json()
 
 
 # Convenience function for creating a client

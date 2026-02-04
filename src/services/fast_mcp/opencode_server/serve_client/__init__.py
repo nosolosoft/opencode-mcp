@@ -41,6 +41,11 @@ from .models import (
     PromptRequest,
     PromptPart,
     ModelInfo,
+    # Search & File models
+    FindTextMatch,
+    FileContentResponse,
+    FileNode,
+    FileStatusEntry,
 )
 from .session_manager import SessionManager, SessionContext, SessionInfo
 from .sse_handler import SSEHandler, StreamedResponse, SSEEventAggregator
@@ -88,4 +93,9 @@ __all__ = [
     "PromptRequest",
     "PromptPart",
     "ModelInfo",
+    # Search & File models
+    "FindTextMatch",
+    "FileContentResponse",
+    "FileNode",
+    "FileStatusEntry",
 ]
