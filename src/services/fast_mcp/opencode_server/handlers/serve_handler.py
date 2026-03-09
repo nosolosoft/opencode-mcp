@@ -759,6 +759,357 @@ class ServeHandler:
                 exit_code=1,
             )
 
+    # =========================================================================
+    # Search & File Tool Methods (Serve API endpoints)
+    # =========================================================================
+
+    async def search_text(
+        self,
+        pattern: str,
+        directory: Optional[str] = None,
+    ) -> OpenCodeResult:
+        """
+        Search for text patterns across files using ripgrep.
+
+        Truncates results to settings.max_search_results.
+
+        Args:
+            pattern: Regex pattern to search for
+            directory: Working directory override
+
+        Returns:
+            OpenCodeResult with list of matches
+        """
+        start_time = time.time()
+
+        await self._ensure_initialized()
+
+        directory = directory or self.default_directory
+
+        try:
+            matches = await self.client.find_text(
+                pattern=pattern,
+                directory=directory,
+                timeout=float(settings.timeout_search),
+            )
+
+            total_count = len(matches)
+            truncated = False
+
+            if total_count > settings.max_search_results:
+                matches = matches[:settings.max_search_results]
+                truncated = True
+
+            # Format matches for readability
+            formatted = []
+            for m in matches:
+                path_text = m.get("path", {}).get("text", "") if isinstance(m.get("path"), dict) else str(m.get("path", ""))
+                line_text = m.get("lines", {}).get("text", "").rstrip() if isinstance(m.get("lines"), dict) else str(m.get("lines", ""))
+                formatted.append({
+                    "path": path_text,
+                    "line_number": m.get("line_number", 0),
+                    "text": line_text,
+                })
+
+            result_data = {
+                "matches": formatted,
+                "count": len(formatted),
+                "total": total_count,
+                "pattern": pattern,
+            }
+
+            if truncated:
+                result_data["truncated"] = True
+                result_data["message"] = (
+                    f"Showing {settings.max_search_results} of {total_count} matches. "
+                    f"Refine your pattern for more specific results."
+                )
+
+            return OpenCodeResult(
+                success=True,
+                data=result_data,
+                execution_time=time.time() - start_time,
+                exit_code=0,
+            )
+        except Exception as e:
+            logger.error(f"search_text error: {e}", exc_info=True)
+            return OpenCodeResult(
+                success=False,
+                error=str(e),
+                execution_time=time.time() - start_time,
+                exit_code=1,
+                is_error=True,
+            )
+
+    async def find_files(
+        self,
+        query: str,
+        directory: Optional[str] = None,
+        file_type: Optional[str] = None,
+    ) -> OpenCodeResult:
+        """
+        Search for files by name or pattern.
+
+        Args:
+            query: File name pattern
+            directory: Working directory override
+            file_type: Filter by 'file' or 'directory'
+
+        Returns:
+            OpenCodeResult with list of matching file paths
+        """
+        start_time = time.time()
+
+        await self._ensure_initialized()
+
+        directory = directory or self.default_directory
+
+        try:
+            files = await self.client.find_files(
+                query=query,
+                directory=directory,
+                file_type=file_type,
+                timeout=float(settings.timeout_search),
+            )
+
+            return OpenCodeResult(
+                success=True,
+                data={
+                    "files": files,
+                    "count": len(files),
+                    "query": query,
+                },
+                execution_time=time.time() - start_time,
+                exit_code=0,
+            )
+        except Exception as e:
+            logger.error(f"find_files error: {e}", exc_info=True)
+            return OpenCodeResult(
+                success=False,
+                error=str(e),
+                execution_time=time.time() - start_time,
+                exit_code=1,
+                is_error=True,
+            )
+
+    async def read_file(
+        self,
+        path: str,
+        directory: Optional[str] = None,
+    ) -> OpenCodeResult:
+        """
+        Read file content with binary detection and size limits.
+
+        Binary files return a placeholder message.
+        Files exceeding max_file_read_size are truncated.
+
+        Args:
+            path: File path (relative to project root)
+            directory: Working directory override
+
+        Returns:
+            OpenCodeResult with file content
+        """
+        start_time = time.time()
+
+        await self._ensure_initialized()
+
+        directory = directory or self.default_directory
+
+        try:
+            data = await self.client.read_file(
+                path=path,
+                directory=directory,
+                timeout=float(settings.timeout_file_ops),
+            )
+
+            file_type = data.get("type", "text")
+            content = data.get("content", "")
+
+            # Handle empty response (API returns 200 with empty content for nonexistent files)
+            if file_type == "text" and not content and not data.get("diff"):
+                return OpenCodeResult(
+                    success=False,
+                    error=f"File not found or empty: {path}",
+                    execution_time=time.time() - start_time,
+                    exit_code=1,
+                    is_error=True,
+                )
+
+            # Handle binary files
+            if file_type == "binary":
+                return OpenCodeResult(
+                    success=True,
+                    data={
+                        "path": path,
+                        "type": "binary",
+                        "content": f"[Binary file] (MIME: {data.get('mimeType', 'unknown')}). Cannot display as text.",
+                        "size": len(content) if content else 0,
+                    },
+                    execution_time=time.time() - start_time,
+                    exit_code=0,
+                )
+
+            # Detect binary content via null bytes (fallback)
+            if content and "\x00" in content:
+                return OpenCodeResult(
+                    success=True,
+                    data={
+                        "path": path,
+                        "type": "binary",
+                        "content": f"[Binary file] (Size: {len(content)} bytes). Cannot display as text.",
+                        "size": len(content),
+                    },
+                    execution_time=time.time() - start_time,
+                    exit_code=0,
+                )
+
+            # Truncate large files
+            truncated = False
+            original_size = len(content.encode("utf-8", errors="replace"))
+            if original_size > settings.max_file_read_size:
+                # Truncate to byte limit (approximate for UTF-8)
+                content = content[:settings.max_file_read_size]
+                truncated = True
+
+            result_data = {
+                "path": path,
+                "type": file_type,
+                "content": content,
+                "size": original_size,
+            }
+
+            if data.get("diff"):
+                result_data["diff"] = data["diff"]
+
+            if truncated:
+                result_data["truncated"] = True
+                result_data["message"] = (
+                    f"File truncated to {settings.max_file_read_size // 1024}KB "
+                    f"(original: {original_size // 1024}KB)."
+                )
+
+            return OpenCodeResult(
+                success=True,
+                data=result_data,
+                execution_time=time.time() - start_time,
+                exit_code=0,
+            )
+        except Exception as e:
+            error_msg = str(e)
+            # Detect file not found from HTTP 404 or specific error messages
+            is_not_found = "404" in error_msg or "not found" in error_msg.lower()
+            return OpenCodeResult(
+                success=False,
+                error=f"File not found: {path}" if is_not_found else error_msg,
+                execution_time=time.time() - start_time,
+                exit_code=1,
+                is_error=True,
+            )
+
+    async def list_directory(
+        self,
+        path: str = ".",
+        directory: Optional[str] = None,
+    ) -> OpenCodeResult:
+        """
+        List files and directories at a path.
+
+        Args:
+            path: Directory path to list (relative to project root)
+            directory: Working directory override
+
+        Returns:
+            OpenCodeResult with directory entries
+        """
+        start_time = time.time()
+
+        await self._ensure_initialized()
+
+        directory = directory or self.default_directory
+
+        try:
+            entries = await self.client.list_directory(
+                path=path,
+                directory=directory,
+                timeout=float(settings.timeout_file_ops),
+            )
+
+            # Format entries
+            formatted = []
+            for entry in entries:
+                formatted.append({
+                    "name": entry.get("name", ""),
+                    "path": entry.get("path", ""),
+                    "type": entry.get("type", "file"),
+                    "ignored": entry.get("ignored", False),
+                })
+
+            return OpenCodeResult(
+                success=True,
+                data={
+                    "entries": formatted,
+                    "count": len(formatted),
+                    "path": path,
+                },
+                execution_time=time.time() - start_time,
+                exit_code=0,
+            )
+        except Exception as e:
+            error_msg = str(e)
+            is_not_found = "404" in error_msg or "not found" in error_msg.lower()
+            return OpenCodeResult(
+                success=False,
+                error=f"Directory not found: {path}" if is_not_found else error_msg,
+                execution_time=time.time() - start_time,
+                exit_code=1,
+                is_error=True,
+            )
+
+    async def file_status(
+        self,
+        directory: Optional[str] = None,
+    ) -> OpenCodeResult:
+        """
+        Get git status of modified files.
+
+        Args:
+            directory: Working directory override
+
+        Returns:
+            OpenCodeResult with git file status entries
+        """
+        start_time = time.time()
+
+        await self._ensure_initialized()
+
+        directory = directory or self.default_directory
+
+        try:
+            entries = await self.client.file_status(
+                directory=directory,
+                timeout=float(settings.timeout_file_ops),
+            )
+
+            return OpenCodeResult(
+                success=True,
+                data={
+                    "files": entries,
+                    "count": len(entries),
+                },
+                execution_time=time.time() - start_time,
+                exit_code=0,
+            )
+        except Exception as e:
+            logger.error(f"file_status error: {e}", exc_info=True)
+            return OpenCodeResult(
+                success=False,
+                error=str(e),
+                execution_time=time.time() - start_time,
+                exit_code=1,
+                is_error=True,
+            )
+
 
 # Global handler instance (lazy initialized)
 _serve_handler: Optional[ServeHandler] = None

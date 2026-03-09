@@ -187,6 +187,105 @@ def build_tools(model_list: Optional[List[str]] = None) -> List[Tool]:
                 "properties": {},
             },
         ),
+        # =====================================================================
+        # Search & File Tools (via opencode serve API)
+        # =====================================================================
+        Tool(
+            name="opencode_search_text",
+            description="Search for text patterns across files in the project using ripgrep. "
+            "Returns matching lines with file paths and line numbers. "
+            "Supports regex patterns. Results are limited to 200 matches.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "Regex pattern to search for (ripgrep syntax)",
+                    },
+                    "directory": {
+                        "type": "string",
+                        "description": "Working directory (project root). Optional, uses server default if omitted.",
+                    },
+                },
+                "required": ["pattern"],
+            },
+        ),
+        Tool(
+            name="opencode_find_files",
+            description="Search for files by name or pattern in the project. "
+            "Returns matching file paths. Useful for locating files before reading them.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "File name or pattern to search for (e.g., 'server.py', '*.tsx')",
+                    },
+                    "directory": {
+                        "type": "string",
+                        "description": "Working directory (project root). Optional.",
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "Filter by entry type",
+                        "enum": ["file", "directory"],
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="opencode_read_file",
+            description="Read the content of a file. Returns text content for text files, "
+            "or a placeholder message for binary files. Large files are truncated to 100KB.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path relative to the project root (e.g., 'src/main.py')",
+                    },
+                    "directory": {
+                        "type": "string",
+                        "description": "Working directory (project root). Optional.",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
+            name="opencode_list_directory",
+            description="List files and directories at a given path. "
+            "Shows file names, types (file/directory), and whether they are gitignored.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Directory path to list, relative to project root (default: '.')",
+                        "default": ".",
+                    },
+                    "directory": {
+                        "type": "string",
+                        "description": "Working directory (project root). Optional.",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="opencode_file_status",
+            description="Get git status of all modified files in the project. "
+            "Shows which files are added, modified, or deleted with line counts.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "directory": {
+                        "type": "string",
+                        "description": "Working directory (project root). Optional.",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -256,6 +355,10 @@ def _get_timeout_for_operation(name: str, user_timeout: Optional[int] = None) ->
         base_timeout = settings.timeout_list_sessions
     elif name == "opencode_health_check":
         base_timeout = settings.timeout_health
+    elif name in ("opencode_search_text", "opencode_find_files"):
+        base_timeout = settings.timeout_search
+    elif name in ("opencode_read_file", "opencode_list_directory", "opencode_file_status"):
+        base_timeout = settings.timeout_file_ops
     else:
         base_timeout = settings.default_timeout
 
@@ -337,6 +440,54 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
 
         elif name == "opencode_health_check":
             result = await _execute_health_check()
+
+        # =================================================================
+        # Search & File Tools (via serve API)
+        # =================================================================
+
+        elif name == "opencode_search_text":
+            pattern = arguments.get("pattern", "").strip()
+            if not pattern:
+                raise ValueError("'pattern' is required and cannot be empty")
+            handler = await get_or_create_serve_handler()
+            result = await handler.search_text(
+                pattern=pattern,
+                directory=arguments.get("directory"),
+            )
+
+        elif name == "opencode_find_files":
+            query = arguments.get("query", "").strip()
+            if not query:
+                raise ValueError("'query' is required and cannot be empty")
+            handler = await get_or_create_serve_handler()
+            result = await handler.find_files(
+                query=query,
+                directory=arguments.get("directory"),
+                file_type=arguments.get("type"),
+            )
+
+        elif name == "opencode_read_file":
+            path = arguments.get("path", "").strip()
+            if not path:
+                raise ValueError("'path' is required and cannot be empty")
+            handler = await get_or_create_serve_handler()
+            result = await handler.read_file(
+                path=path,
+                directory=arguments.get("directory"),
+            )
+
+        elif name == "opencode_list_directory":
+            handler = await get_or_create_serve_handler()
+            result = await handler.list_directory(
+                path=arguments.get("path", "."),
+                directory=arguments.get("directory"),
+            )
+
+        elif name == "opencode_file_status":
+            handler = await get_or_create_serve_handler()
+            result = await handler.file_status(
+                directory=arguments.get("directory"),
+            )
 
         else:
             raise ValueError(f"Unknown tool: {name}")

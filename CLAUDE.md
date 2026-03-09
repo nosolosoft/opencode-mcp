@@ -25,7 +25,7 @@ Basado en el Principio 5: Forzar al modelo a mostrar reglas en cada respuesta cr
 
     <complexity_router>
       <simple>google/gemini-3-flash-preview</simple>
-      <medium>google/gemini-3-pro-preview</medium>
+      <medium>google/gemini-3.1-pro-preview</medium>
       <complex>openai/gpt-5.2-codex</complex>
       <critical>openai/gpt-5.2-codex</critical>
     </complexity_router>
@@ -115,7 +115,7 @@ Además de los MCP servers, se puede usar CLI directo via skill `delegacion` par
 | CLI | Comando | Default Model | Cuándo Usar |
 |-----|---------|---------------|-------------|
 | OpenCode | `opencode run -m MODEL "PROMPT"` | glm-4.7 | Background tasks, paralelo |
-| Gemini | `gemini --model MODEL --yolo "PROMPT"` | google/gemini-3-pro-preview | Análisis largo, fire-and-forget |
+| Gemini | `gemini --model MODEL --yolo "PROMPT"` | google/gemini-3.1-pro-preview | Análisis largo, fire-and-forget |
 | Codex | `codex exec -m MODEL --dangerously-bypass-approvals-and-sandbox "PROMPT"` | gpt-5.1-codex-max | Implementación larga |
 | Claude | `claude -p --model MODEL --dangerously-skip-permissions "PROMPT"` | opus | Decisiones delegadas |
 

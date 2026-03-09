@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # OpenCode CLI Configuration
     opencode_command: str = "opencode"
     opencode_default_model: Optional[str] = (
-        "openai/gpt-5.2-codex"
+        "openai/gpt-5.3-codex"
     )
     opencode_default_agent: Optional[str] = None
 
@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     timeout_list_models: int = 30  # 30s for listing models
     timeout_list_sessions: int = 30  # 30s for listing sessions
     timeout_health: int = 15  # 15s for health checks
+    timeout_search: int = 45  # 45s for text search and file find (ripgrep)
+    timeout_file_ops: int = 15  # 15s for read_file, list_directory, file_status
     timeout_buffer: int = 30  # Buffer between subprocess and MCP timeout
 
     # Retry Configuration
@@ -55,6 +57,10 @@ class Settings(BaseSettings):
     # oh-my-opencode Integration
     ultrawork_enabled: bool = True  # Auto-inject ultrawork keyword for multi-agent orchestration
     ultrawork_keyword: str = "ulw"  # Keyword to inject (ulw = ultrawork shorthand)
+
+    # Search & File Limits
+    max_search_results: int = 200  # Hard limit on text search matches
+    max_file_read_size: int = 100 * 1024  # 100KB max file content returned
 
     # File Configuration
     max_file_size: int = 10 * 1024 * 1024  # 10MB
