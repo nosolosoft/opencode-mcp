@@ -402,6 +402,7 @@ class OpenCodeExecutor:
         files: Optional[List[str]] = None,
         timeout: Optional[int] = None,
         variant: Optional[str] = None,
+        cwd: Optional[str] = None,
     ) -> OpenCodeResult:
         """
         Run OpenCode with a prompt message.
@@ -439,6 +440,7 @@ class OpenCodeExecutor:
             args,
             timeout=timeout,
             enable_retry=settings.retry_on_timeout,
+            cwd=cwd,
         )
 
     async def _is_serve_running(self) -> bool:

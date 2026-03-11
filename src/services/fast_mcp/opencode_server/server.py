@@ -65,7 +65,7 @@ def _build_model_description(model_list: Optional[List[str]] = None) -> str:
     """Build the description for the model parameter with examples."""
     base = (
         "Model in provider/model format. Examples: 'anthropic/claude-sonnet-4-20250514', "
-        "'google/gemini-3-flash-preview', 'openai/gpt-5.2-codex'. "
+        "'google/gemini-3-flash-preview', 'openai/gpt-5.4'. "
         "Short aliases also accepted: 'opus', 'sonnet', 'haiku', 'gemini-flash', 'codex'. "
         "If omitted, uses server default. DO NOT guess model names - use list_models tool first "
         "or omit this parameter entirely."
@@ -394,6 +394,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             model = await _validate_and_resolve_model(raw_model)
 
             session_id = arguments.get("session_id")
+            directory = arguments.get("directory")
             agent = arguments.get("agent") or settings.opencode_default_agent
             max_output_tokens = arguments.get(
                 "max_output_tokens", settings.default_max_output_tokens
@@ -418,6 +419,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                     max_output_tokens=max_output_tokens,
                     variant=arguments.get("variant"),
                     use_ultrawork=use_ultrawork,
+                    cwd=directory,
                 )
                 # Show resolution info if model was corrected
                 if raw_model and raw_model != model:
