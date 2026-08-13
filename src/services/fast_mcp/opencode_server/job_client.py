@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
-from .serve_client.models import ModelInfo, PermissionResponseType
+from .serve_client.models import ModelInfo, PermissionResponseType, SessionStatus
 
 
 class SessionLike(Protocol):
@@ -36,6 +36,8 @@ class JobClient(Protocol):
     ) -> None: ...
 
     async def get_messages(self, session_id: str) -> list[dict[str, Any]]: ...
+
+    async def get_session_status(self, session_id: str) -> SessionStatus: ...
 
     async def stream_events(self, directory: str | None = None) -> AsyncIterator[Any]: ...
 

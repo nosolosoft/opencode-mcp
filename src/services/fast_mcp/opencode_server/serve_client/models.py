@@ -5,7 +5,6 @@ Pydantic models based on OpenCode's TypeScript types.gen.d.ts
 These models represent the data structures used by the opencode serve HTTP API.
 """
 
-from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field
@@ -66,6 +65,7 @@ class ModelInfo(BaseModel):
     """Model selection information."""
     providerID: str = Field(description="Provider identifier (e.g., 'anthropic')")
     modelID: str = Field(description="Model identifier (e.g., 'claude-sonnet-4-20250514')")
+    variant: Optional[str] = Field(default=None, description="Optional model variant")
 
 
 class TokenInfo(BaseModel):
