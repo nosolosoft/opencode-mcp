@@ -11,6 +11,9 @@ from src.services.fast_mcp.opencode_server.job_models import (
 )
 from src.services.fast_mcp.opencode_server.job_manager import JobManager
 from src.services.fast_mcp.opencode_server.job_store import JobStore
+from src.services.fast_mcp.opencode_server.models import OpenCodeResult
+from src.services.fast_mcp.opencode_server.opencode_executor import OpenCodeExecutor
+from src.services.fast_mcp.opencode_server.serve_client.models import SessionStatus, SessionStatusType
 
 
 class FakeProcess:
@@ -29,6 +32,7 @@ class FakeClient:
         messages: list[dict] | None = None,
         keep_stream_open: bool = False,
         require_stream_before_prompt: bool = False,
+        session_idle: bool = False,
     ) -> None:
         self.messages: list[str] = []
         self.event_delay = event_delay
@@ -36,9 +40,11 @@ class FakeClient:
         self.history = messages or []
         self.keep_stream_open = keep_stream_open
         self.require_stream_before_prompt = require_stream_before_prompt
+        self.session_idle = session_idle
         self.stream_started = False
         self.aborted_sessions: list[str] = []
         self.prompt_options: dict[str, object] = {}
+        self.sessions_created = 0
 
     async def connect(self) -> None:
         return None
@@ -50,6 +56,7 @@ class FakeClient:
         return [{"name": "build", "mode": "primary"}, {"name": "explore", "mode": "subagent"}]
 
     async def create_session(self, title: str | None = None, directory: str | None = None):
+        self.sessions_created += 1
         return type("Session", (), {"id": "ses_test"})()
 
     async def prompt_async(self, session_id: str, text: str, **kwargs: str | None) -> None:
@@ -62,6 +69,10 @@ class FakeClient:
 
     async def get_messages(self, session_id: str) -> list[dict]:
         return self.history
+
+    async def get_session_status(self, session_id: str) -> SessionStatus:
+        status = SessionStatusType.IDLE if self.session_idle else SessionStatusType.BUSY
+        return SessionStatus(type=status)
 
     async def abort_session(self, session_id: str) -> None:
         self.aborted_sessions.append(session_id)
@@ -119,7 +130,14 @@ async def test_start_job_injects_ulw_only_when_requested(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_job_converts_public_model_id_to_prompt_model(tmp_path) -> None:
+async def test_start_job_converts_public_model_id_to_prompt_model(monkeypatch, tmp_path) -> None:
+    async def list_models(self, provider=None, timeout=None):
+        return OpenCodeResult(
+            success=True,
+            data=["openai/gpt-5.4"],
+        )
+
+    monkeypatch.setattr(OpenCodeExecutor, "list_models", list_models)
     client = FakeClient()
     manager = JobManager(
         store=JobStore(tmp_path / "jobs.db"),
@@ -143,6 +161,89 @@ async def test_start_job_converts_public_model_id_to_prompt_model(tmp_path) -> N
 
 
 @pytest.mark.asyncio
+async def test_start_job_passes_variant_inside_prompt_model(monkeypatch, tmp_path) -> None:
+    async def list_models(self, provider=None, timeout=None):
+        return OpenCodeResult(
+            success=True,
+            data=["google/gemini-3.1-pro-preview"],
+        )
+
+    monkeypatch.setattr(OpenCodeExecutor, "list_models", list_models)
+    client = FakeClient()
+    manager = JobManager(
+        store=JobStore(tmp_path / "jobs.db"),
+        process=FakeProcess(),
+        client_factory=lambda directory: client,
+    )
+
+    await manager.start(
+        JobStartRequest(
+            message="Do the work",
+            directory=str(tmp_path),
+            model="google/gemini-3.1-pro-preview",
+            variant="high",
+        )
+    )
+
+    model = client.prompt_options["model"]
+    assert model is not None
+    assert model.variant == "high"
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_start_job_rejects_unknown_model_with_live_options(monkeypatch, tmp_path) -> None:
+    async def list_models(self, provider=None, timeout=None):
+        return OpenCodeResult(
+            success=True,
+            data=["openai/gpt-5.4", "openai/gpt-5.6-luna", "google/gemini-3.1-pro-preview"],
+        )
+
+    monkeypatch.setattr(OpenCodeExecutor, "list_models", list_models)
+    client = FakeClient()
+    manager = JobManager(
+        store=JobStore(tmp_path / "jobs.db"),
+        process=FakeProcess(),
+        client_factory=lambda directory: client,
+    )
+
+    with pytest.raises(ValueError, match="openai/gpt-5.4.*openai/gpt-5.6-luna"):
+        await manager.start(
+            JobStartRequest(
+                message="Do the work",
+                directory=str(tmp_path),
+                model="openai/not-a-real-model",
+            )
+        )
+
+    assert client.sessions_created == 0
+    assert client.messages == []
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_start_job_rejects_unknown_agent_with_available_names(tmp_path) -> None:
+    client = FakeClient()
+    manager = JobManager(
+        store=JobStore(tmp_path / "jobs.db"),
+        process=FakeProcess(),
+        client_factory=lambda directory: client,
+    )
+
+    with pytest.raises(ValueError, match="build.*explore"):
+        await manager.start(
+            JobStartRequest(
+                message="Do the work",
+                directory=str(tmp_path),
+                agent="missing",
+            )
+        )
+
+    assert client.sessions_created == 0
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_start_subscribes_to_events_before_sending_prompt(tmp_path) -> None:
     client = FakeClient(require_stream_before_prompt=True)
     manager = JobManager(
@@ -154,6 +255,25 @@ async def test_start_subscribes_to_events_before_sending_prompt(tmp_path) -> Non
     await manager.start(JobStartRequest(message="Do the work", directory=str(tmp_path)))
 
     assert client.stream_started
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_monitor_completes_when_session_is_idle_without_terminal_sse_event(tmp_path) -> None:
+    client = FakeClient(session_idle=True, keep_stream_open=True)
+    manager = JobManager(
+        store=JobStore(tmp_path / "jobs.db"),
+        process=FakeProcess(),
+        client_factory=lambda directory: client,
+    )
+    manager.MONITOR_TICK_SECONDS = 0.01
+
+    record = await manager.start(JobStartRequest(message="Do the work", directory=str(tmp_path)))
+    await asyncio.sleep(0.03)
+
+    current = manager.store.get(record.job_id)
+    assert current is not None
+    assert current.status is JobStatus.COMPLETED
     await manager.shutdown()
 
 
