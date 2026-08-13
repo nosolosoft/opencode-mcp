@@ -12,7 +12,6 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from .handlers.model_registry import get_model_registry
 from .job_manager import JobManager
 from .job_models import JobStartRequest
 from .job_store import JobStore
@@ -68,9 +67,9 @@ def build_tools() -> list[Tool]:
                 {
                     "message": {"type": "string", "minLength": 1},
                     "directory": {"type": "string", "description": "Absolute project directory"},
-                    "agent": {"type": "string", "description": "Any agent returned by opencode_list_agents"},
-                    "model": {"type": "string"},
-                    "variant": {"type": "string"},
+                    "agent": {"type": "string", "description": "Exact agent name returned by opencode_list_agents"},
+                    "model": {"type": "string", "description": "Exact provider/model ID returned by opencode_list_models; omit to use OpenCode's default"},
+                    "variant": {"type": "string", "description": "Optional variant sent inside the selected model"},
                     "session_id": {"type": "string"},
                     "orchestration": {"type": "string", "enum": ["direct", "ulw"], "default": "direct"},
                     "max_runtime_seconds": {"type": "integer", "minimum": 1},
@@ -122,7 +121,7 @@ def build_tools() -> list[Tool]:
         ),
         Tool(
             name="opencode_list_models",
-            description="List models available to the OpenCode CLI.",
+            description="List exact provider/model IDs available to the OpenCode CLI. Use this before selecting a model.",
             inputSchema=_schema({"provider": {"type": "string"}}),
         ),
         Tool(
@@ -184,13 +183,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]: 
             result = await OpenCodeExecutor().list_sessions()
             return _json_content(result.model_dump(mode="json"))
         if name == "opencode_health_check":
-            registry = await get_model_registry()
             cli = await OpenCodeExecutor().check_status()
             return _json_content(
                 {
                     "manager": manager.health(),
                     "cli": cli.model_dump(mode="json"),
-                    "models_cached": len(registry.get_cached_models()),
+                    "models_available": len(cli.available_models or []),
                 }
             )
         raise ValueError(f"Unknown tool: {name}")

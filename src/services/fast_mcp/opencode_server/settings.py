@@ -4,7 +4,7 @@ Configuration management using Pydantic BaseSettings with environment variables.
 """
 
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Optional, List
 from pydantic_settings import BaseSettings
 
 
@@ -32,10 +32,6 @@ class Settings(BaseSettings):
     retry_max_attempts: int = 2  # Max retry attempts (0 = no retries)
     retry_backoff_factor: float = 1.5  # Exponential backoff multiplier
     retry_on_timeout: bool = True  # Retry on timeout errors
-
-    # Model Registry Configuration
-    model_cache_ttl: int = 300  # 5 min cache TTL for model list
-    model_extra_aliases: Dict[str, str] = {}  # Additional user-defined aliases
 
     # Token limits (soft limit via prompt instruction)
     default_max_output_tokens: int = 25000  # Default max output tokens
