@@ -148,67 +148,6 @@ def _json_content(value: Any) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(value, indent=2, default=str))]
 
 
-async def _validate_and_resolve_model(model: Optional[str]) -> str:
-    """
-    Validate and resolve a model parameter.
-
-    Resolution chain: exact match → alias → fuzzy match → default.
-
-    Args:
-        model: The model string from tool arguments (may be None)
-
-    Returns:
-        A valid model ID string
-    """
-    if not model:
-        return settings.opencode_default_model or ""
-
-    try:
-        registry = await get_model_registry()
-        is_valid, resolved, method = registry.validate_and_resolve(model)
-
-        if is_valid:
-            return resolved  # Exact match
-        elif resolved:
-            logger.info(f"Model resolved via {method}: '{model}' -> '{resolved}'")
-            return resolved
-        else:
-            logger.warning(
-                f"Model '{model}' could not be resolved, falling back to default: "
-                f"'{settings.opencode_default_model}'"
-            )
-            return settings.opencode_default_model or ""
-    except Exception as e:
-        logger.error(f"Model validation error: {e}, using provided model as-is")
-        return model
-
-
-def _get_timeout_for_operation(name: str, user_timeout: Optional[int] = None) -> int:
-    """
-    Get the appropriate timeout for an operation.
-
-    Uses per-operation defaults, respects user overrides, and applies
-    the buffer for subprocess coordination.
-    """
-    if name == "opencode_list_models":
-        base_timeout = settings.timeout_list_models
-    elif name == "opencode_list_sessions":
-        base_timeout = settings.timeout_list_sessions
-    elif name == "opencode_health_check":
-        base_timeout = settings.timeout_health
-    elif name in ("opencode_search_text", "opencode_find_files"):
-        base_timeout = settings.timeout_search
-    elif name in ("opencode_read_file", "opencode_list_directory", "opencode_file_status"):
-        base_timeout = settings.timeout_file_ops
-    else:
-        base_timeout = settings.default_timeout
-
-    # User override takes priority but is capped
-    effective = min(user_timeout or base_timeout, settings.max_timeout)
-
-    return effective
-
-
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:  # noqa: ANN401
     """Dispatch a validated MCP call to the job manager or CLI discovery."""
