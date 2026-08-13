@@ -31,8 +31,12 @@ herramientas nativas.
 5. El subagente responde con `opencode_job_respond`.
 
 El agente se valida contra los agentes disponibles en OpenCode. Se aceptan
-agentes integrados y personalizados. `orchestration` es `direct` por defecto;
-solo `ulw` añade la activación de oh-my-openagent.
+agentes integrados y personalizados; si el nombre no existe, el error incluye
+los nombres válidos. Para elegir modelo, llama primero a `opencode_list_models`
+y pasa a `opencode_job_start` el ID exacto `provider/model`. Un modelo inválido
+también devuelve la lista viva del proveedor. Si omites `model`, OpenCode decide
+según su propia configuración. `orchestration` es `direct` por defecto; solo
+`ulw` añade la activación de oh-my-openagent.
 
 No existe un timeout de ejecución predeterminado. `max_runtime_seconds` solo
 se aplica si el trabajo lo solicita y no consume tiempo mientras espera una
