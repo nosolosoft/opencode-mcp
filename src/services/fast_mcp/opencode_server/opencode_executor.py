@@ -508,11 +508,36 @@ class OpenCodeExecutor:
         if provider:
             args.append(provider)
 
-        return await self.execute_command(
+        result = await self.execute_command(
             args,
             use_json_format=False,
             timeout=timeout or settings.timeout_list_models,
         )
+        if not result.success:
+            return result
+
+        return result.model_copy(
+            update={"data": self._model_ids(result), "raw_output": None}
+        )
+
+    @staticmethod
+    def _model_ids(result: OpenCodeResult) -> list[str]:
+        """Extract unique provider/model IDs from a models command result."""
+        candidates: list[str] = []
+        if result.raw_output:
+            candidates.extend(result.raw_output.splitlines())
+        elif isinstance(result.data, list):
+            candidates.extend(item for item in result.data if isinstance(item, str))
+
+        model_ids: list[str] = []
+        for candidate in candidates:
+            stripped = candidate.strip()
+            model_id = stripped.split(maxsplit=1)[0] if stripped else ""
+            if "/" not in model_id or model_id.startswith(("#", "-")):
+                continue
+            if model_id not in model_ids:
+                model_ids.append(model_id)
+        return model_ids
 
     async def list_sessions(self, timeout: Optional[int] = None) -> OpenCodeResult:
         """
@@ -584,30 +609,10 @@ class OpenCodeExecutor:
         models_result = await self.list_models()
         available_models = None
 
-        if models_result.success:
-            # Try to extract models from raw_output first
-            if models_result.raw_output:
-                models = []
-                for line in models_result.raw_output.split("\n"):
-                    line = line.strip()
-                    if "/" in line and not line.startswith("#"):
-                        models.append(line)
-                available_models = models if models else None
-            # Fallback to data if raw_output is None (JSON was parsed)
-            elif models_result.data:
-                if isinstance(models_result.data, list):
-                    available_models = models_result.data
-                elif isinstance(models_result.data, dict):
-                    # Try common keys for model lists
-                    available_models = (
-                        models_result.data.get("models")
-                        or models_result.data.get("items")
-                        or models_result.data.get("raw_output", "").split("\n")
-                    )
-                    if isinstance(available_models, str):
-                        available_models = [
-                            m.strip() for m in available_models.split("\n") if "/" in m
-                        ]
+        if models_result.success and isinstance(models_result.data, list):
+            available_models = [
+                model for model in models_result.data if isinstance(model, str)
+            ]
 
         return OpenCodeStatusResponse(
             status="available",
