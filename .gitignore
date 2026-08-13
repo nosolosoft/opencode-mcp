@@ -69,6 +69,8 @@ logs/
 # Project specific
 opencode/
 tests/*.txt
+data/
+.omo/
 .claude/
 
 # Distribution

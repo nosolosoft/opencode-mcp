@@ -1,188 +1,89 @@
-# OpenCode MCP Server
+# OpenCode MCP Jobs
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![MCP 1.2.0+](https://img.shields.io/badge/MCP-1.2.0+-green.svg)](https://modelcontextprotocol.io/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+MCP local para lanzar trabajos persistentes de OpenCode desde un subagente del
+CLI. Las ejecuciones no bloquean la llamada MCP: devuelven un `job_id`, guardan
+su estado en SQLite y se pueden consultar o reanudar después de reiniciar el
+MCP.
 
-An MCP (Model Context Protocol) server that provides seamless integration with [OpenCode](https://github.com/sst/opencode), the open-source AI coding agent for the terminal.
+## Herramientas
 
-## Features
+- `opencode_job_start`: inicia un trabajo y acepta `message`, `directory`, `agent`, `model`, `variant`, `session_id`, `orchestration` y `max_runtime_seconds`.
+- `opencode_job_status`: consulta estado, salud, actividad e interacción pendiente.
+- `opencode_job_result`: recupera salida y razonamiento por bloques.
+- `opencode_job_respond`: responde un permiso o una pregunta.
+- `opencode_job_cancel`: aborta la sesión.
+- `opencode_job_list`: enumera trabajos recientes.
+- `opencode_list_agents`: descubre agentes disponibles en un proyecto.
+- `opencode_list_models`: descubre modelos del CLI.
+- `opencode_list_sessions`: lista sesiones del CLI.
+- `opencode_health_check`: comprueba SQLite, el servidor delegado, el CLI y los modelos.
 
-- **Execute OpenCode Commands**: Run any OpenCode CLI command programmatically
-- **Session Management**: Create, continue, and export coding sessions
-- **Model Discovery**: List available AI models from all configured providers
-- **Async Execution**: Non-blocking command execution with timeout handling
-- **JSON Lines Parsing**: Robust parsing of OpenCode's streaming output format
+`opencode_prompt` y las herramientas públicas de archivos han sido retiradas.
+OpenCode ya proporciona `read`, `grep`, `glob`, estado Git y edición como
+herramientas nativas.
 
-## Tools Available
+## Flujo
 
-| Tool | Description |
-|------|-------------|
-| `execute_opencode_command` | Execute any OpenCode CLI command with full flexibility |
-| `opencode_run` | Run OpenCode with a simple prompt message |
-| `opencode_continue_session` | Continue an existing OpenCode session |
-| `opencode_list_models` | List available models, optionally filtered by provider |
-| `opencode_export_session` | Export session data as JSON |
-| `opencode_get_status` | Check OpenCode CLI availability and status |
+1. El subagente llama a `opencode_job_start` con un directorio absoluto.
+2. El MCP devuelve el trabajo inmediatamente.
+3. El subagente consulta `opencode_job_status` y `opencode_job_result`.
+4. Si OpenCode pide permiso o una respuesta, el estado pasa a `waiting_input`.
+5. El subagente responde con `opencode_job_respond`.
 
-## Installation
+El agente se valida contra los agentes disponibles en OpenCode. Se aceptan
+agentes integrados y personalizados. `orchestration` es `direct` por defecto;
+solo `ulw` añade la activación de oh-my-openagent.
 
-### Prerequisites
+No existe un timeout de ejecución predeterminado. `max_runtime_seconds` solo
+se aplica si el trabajo lo solicita y no consume tiempo mientras espera una
+interacción. La falta de eventos marca la salud como `stale`, pero no cancela
+el trabajo. Las interacciones abandonadas vencen tras 24 horas.
 
-- Python 3.10+
-- [OpenCode CLI](https://opencode.ai/docs/cli/) installed and configured
-- MCP-compatible client (Claude Desktop, etc.)
+## Configuración
 
-### Install Dependencies
+Dependencias:
 
 ```bash
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
 
-### Configure MCP Client
-
-Add to your MCP client configuration (e.g., `~/.claude.json` or Claude Desktop settings):
+Entrada MCP:
 
 ```json
 {
-  "mcpServers": {
-    "opencode": {
-      "command": "python",
-      "args": ["-m", "src.services.fast_mcp.opencode_server"],
-      "cwd": "/path/to/opencode-mcp"
-    }
+  "opencode": {
+    "type": "local",
+    "command": ["/ruta/al/proyecto/.venv/bin/python", "-m", "src.services.fast_mcp.opencode_server"],
+    "environment": {
+      "PYTHONPATH": "/ruta/al/proyecto",
+      "OPENCODE_JOB_DB": "~/.local/state/opencode-mcp/jobs.db",
+      "OPENCODE_SERVE_PORT": "4097"
+    },
+    "enabled": true,
+    "timeout": 30000
   }
 }
 ```
 
-## Usage
+El MCP arranca un `opencode serve` dedicado en `127.0.0.1:4097` y le inyecta
+una configuración donde el MCP `opencode` está desactivado. Esto impide que la
+sesión delegada se invoque a sí misma.
 
-### Basic Usage
+## Persistencia
 
-Once configured, the MCP tools are available through your MCP client:
+El estado se guarda por defecto en:
 
-```
-# Run a coding task
-opencode_run(message="Create a Python function that calculates fibonacci numbers")
-
-# List available models
-opencode_list_models(provider="anthropic")
-
-# Continue a previous session
-opencode_continue_session(session_id="abc123", message="Now add unit tests")
-
-# Check status
-opencode_get_status()
+```text
+~/.local/state/opencode-mcp/jobs.db
 ```
 
-### Tool Parameters
+Se puede cambiar con `OPENCODE_JOB_DB`. Los resultados completos permanecen en
+la sesión de OpenCode; SQLite conserva metadatos, interacciones y un snapshot
+de salida para recuperar el trabajo sin duplicar todo el historial.
 
-#### `execute_opencode_command`
-
-```python
-{
-    "prompt": str,           # Required: The prompt/task for OpenCode
-    "model": str,            # Optional: Model in provider/model format (e.g., "anthropic/claude-sonnet-4-20250514")
-    "agent": str,            # Optional: Agent to use (e.g., "build", "plan")
-    "session": str,          # Optional: Session ID to continue
-    "continue_session": bool, # Optional: Whether to continue last session
-    "timeout": int           # Optional: Timeout in seconds (default: 300, max: 600)
-}
-```
-
-#### `opencode_run`
-
-```python
-{
-    "message": str,     # Required: Message/prompt to send
-    "model": str,       # Optional: Model to use
-    "agent": str,       # Optional: Agent to use
-    "files": [str],     # Optional: Files to attach
-    "timeout": int      # Optional: Timeout in seconds
-}
-```
-
-#### `opencode_continue_session`
-
-```python
-{
-    "session_id": str,  # Required: Session ID to continue
-    "message": str,     # Optional: Follow-up message
-    "timeout": int      # Optional: Timeout in seconds
-}
-```
-
-## Configuration
-
-Environment variables (prefix: `OPENCODE_`):
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OPENCODE_COMMAND` | `opencode` | Path to OpenCode CLI |
-| `OPENCODE_DEFAULT_MODEL` | None | Default model to use |
-| `OPENCODE_DEFAULT_AGENT` | None | Default agent to use |
-| `OPENCODE_DEFAULT_TIMEOUT` | `300` | Default timeout (seconds) |
-| `OPENCODE_MAX_TIMEOUT` | `600` | Maximum timeout (seconds) |
-| `OPENCODE_SERVER_LOG_LEVEL` | `INFO` | Logging level |
-
-## Architecture
-
-```
-src/services/fast_mcp/opencode_server/
-├── __init__.py
-├── __main__.py          # Entry point
-├── server.py            # MCP server & tool definitions
-├── opencode_executor.py # CLI execution wrapper
-├── models.py            # Pydantic models
-├── settings.py          # Configuration
-└── handlers/
-    ├── __init__.py
-    ├── execution.py     # Run/continue operations
-    ├── session.py       # Session management
-    └── discovery.py     # Model/status discovery
-```
-
-## Development
-
-### Running Tests
+## Desarrollo
 
 ```bash
-pytest tests/ -v
+PYTHONPATH=. .venv/bin/pytest -q
+PYTHONPATH=. .venv/bin/python -m src.services.fast_mcp.opencode_server
 ```
-
-### Code Formatting
-
-```bash
-black src/
-ruff check src/
-```
-
-## Roadmap
-
-Planned features for v2.0:
-
-- [ ] `opencode_import_session` - Import sessions from JSON/URL
-- [ ] `opencode_list_sessions` - List all sessions with filtering
-- [ ] `opencode_get_stats` - Usage statistics and cost tracking
-- [ ] `opencode_list_agents` - List available agents
-- [ ] `opencode_github_run` - GitHub Actions integration (async)
-- [ ] `opencode_pr_checkout` - PR workflow support
-
-## Contributing
-
-Contributions are welcome! Please read the contributing guidelines before submitting PRs.
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
-
-## Related Projects
-
-- [OpenCode](https://github.com/sst/opencode) - The AI coding agent this server integrates with
-- [Model Context Protocol](https://modelcontextprotocol.io/) - The protocol specification
-- [MCP SDK](https://github.com/modelcontextprotocol/python-sdk) - Python SDK for MCP
-
-## Acknowledgments
-
-- [SST Team](https://sst.dev/) for creating OpenCode
-- [Anthropic](https://anthropic.com/) for the MCP specification

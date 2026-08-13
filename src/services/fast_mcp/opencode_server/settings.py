@@ -3,6 +3,7 @@ OpenCode MCP Server Settings
 Configuration management using Pydantic BaseSettings with environment variables.
 """
 
+from pathlib import Path
 from typing import Dict, Optional, List
 from pydantic_settings import BaseSettings
 
@@ -13,7 +14,7 @@ class Settings(BaseSettings):
     # OpenCode CLI Configuration
     opencode_command: str = "opencode"
     opencode_default_model: Optional[str] = (
-        "openai/gpt-5.2-codex"
+        "openai/gpt-5.5"
     )
     opencode_default_agent: Optional[str] = None
 
@@ -55,8 +56,13 @@ class Settings(BaseSettings):
     ]
 
     # oh-my-opencode Integration
-    ultrawork_enabled: bool = True  # Auto-inject ultrawork keyword for multi-agent orchestration
+    ultrawork_enabled: bool = False
     ultrawork_keyword: str = "ulw"  # Keyword to inject (ulw = ultrawork shorthand)
+
+    job_db: Path = Path("~/.local/state/opencode-mcp/jobs.db")
+    opencode_serve_host: str = "127.0.0.1"
+    opencode_serve_port: int = 4097
+    job_stale_after_seconds: int = 180
 
     # Search & File Limits
     max_search_results: int = 200  # Hard limit on text search matches

@@ -85,6 +85,7 @@ class ExecutionHandler:
         max_output_tokens: Optional[int] = None,
         variant: Optional[str] = None,
         use_ultrawork: bool = True,
+        cwd: Optional[str] = None,
     ) -> OpenCodeResult:
         """
         Run OpenCode with a prompt.
@@ -123,6 +124,7 @@ class ExecutionHandler:
             files=files,
             timeout=timeout,
             variant=variant,
+            cwd=cwd,
         )
 
         if result.success:
