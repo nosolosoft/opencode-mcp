@@ -43,6 +43,15 @@ DEFAULT_ALIASES: Dict[str, str] = {
     # xAI
     "grok": "xai/grok-3",
     "grok-3": "xai/grok-3",
+    # NVIDIA NIM
+    "nemotron": "nvidia-nim/nvidia/nemotron-3-super-120b-a12b",
+    "nemotron-super": "nvidia-nim/nvidia/nemotron-3-super-120b-a12b",
+    "glm5": "nvidia-nim/z-ai/glm5",
+    "glm-5.1": "nvidia-nim/z-ai/glm-5.1",
+    "glm5.1": "nvidia-nim/z-ai/glm-5.1",
+    "deepseek": "nvidia-nim/deepseek-ai/deepseek-v3.2",
+    "deepseek-v3": "nvidia-nim/deepseek-ai/deepseek-v3.2",
+    "deepseek-v3.2": "nvidia-nim/deepseek-ai/deepseek-v3.2",
 }
 
 # Fallback static model list if `opencode models` fails
@@ -54,6 +63,10 @@ FALLBACK_MODELS: List[str] = [
     "google/gemini-3.1-pro-preview",
     "openai/gpt-5.4",
     "xai/grok-3",
+    "nvidia-nim/nvidia/nemotron-3-super-120b-a12b",
+    "nvidia-nim/z-ai/glm5",
+    "nvidia-nim/z-ai/glm-5.1",
+    "nvidia-nim/deepseek-ai/deepseek-v3.2",
 ]
 
 # Minimum confidence for fuzzy matching (0.0 - 1.0)
