@@ -1,613 +1,212 @@
-"""
-OpenCode MCP Server
-Simplified server focused on sending prompts to OpenCode.
+"""MCP adapter exposing persistent OpenCode jobs."""
 
-Uses HTTP serve API for persistent connection to opencode serve instance.
-"""
+from __future__ import annotations
 
 import asyncio
+import json
 import logging
-import os
 import sys
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from .settings import settings
-from .models import OpenCodeResult
-from .handlers import (
-    ServeHandler,
-    get_serve_handler,
-)
-from .handlers.execution import ExecutionHandler
-from .handlers.model_registry import ModelRegistry, get_model_registry
+from .handlers.model_registry import get_model_registry
+from .job_manager import JobManager
+from .job_models import JobStartRequest
+from .job_store import JobStore
 from .opencode_executor import OpenCodeExecutor
+from .serve_process import ServeProcess
+from .serve_client.client import OpenCodeServeClient
+from .settings import settings
 
-# Configure logging to stderr (never stdout for MCP)
 logging.basicConfig(
     level=getattr(logging, settings.server_log_level),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     stream=sys.stderr,
 )
 logger = logging.getLogger(__name__)
-
-# Initialize server
 server = Server(settings.mcp_server_name)
 
-# Serve handler (lazy initialized when tools are used)
-_serve_handler: Optional[ServeHandler] = None
 
-
-async def get_or_create_serve_handler() -> ServeHandler:
-    """Get or create the serve handler (lazy initialization)."""
-    global _serve_handler
-    if _serve_handler is None:
-        _serve_handler = get_serve_handler(
-            host=os.environ.get("OPENCODE_SERVE_HOST", "127.0.0.1"),
-            port=int(os.environ.get("OPENCODE_SERVE_PORT", "4096")),
-            # Auto-start enabled by default - server is shared across MCP sessions
-            auto_start_server=os.environ.get(
-                "OPENCODE_SERVE_AUTO_START", "true"
-            ).lower()
-            == "true",
+def _manager() -> JobManager:
+    if not hasattr(_manager, "instance"):
+        process = ServeProcess(
+            settings.opencode_command,
+            settings.opencode_serve_host,
+            settings.opencode_serve_port,
         )
-    return _serve_handler
+
+        def client_factory(directory: str) -> OpenCodeServeClient:
+            return OpenCodeServeClient(
+                host=settings.opencode_serve_host,
+                port=settings.opencode_serve_port,
+                directory=directory,
+                auto_approve_permissions=False,
+                timeout=30.0,
+            )
+
+        _manager.instance = JobManager(JobStore(settings.job_db), process, client_factory)
+    return _manager.instance
 
 
-# =============================================================================
-# Tool Definitions - Built dynamically for model enum support
-# =============================================================================
-
-def _build_model_description(model_list: Optional[List[str]] = None) -> str:
-    """Build the description for the model parameter with examples."""
-    base = (
-        "Model in provider/model format. Examples: 'anthropic/claude-sonnet-4-20250514', "
-        "'google/gemini-3-flash-preview', 'openai/gpt-5.4'. "
-        "Short aliases also accepted: 'opus', 'sonnet', 'haiku', 'gemini-flash', 'codex'. "
-        "If omitted, uses server default. DO NOT guess model names - use list_models tool first "
-        "or omit this parameter entirely."
-    )
-    return base
+def _schema(properties: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:
+    result: dict[str, Any] = {"type": "object", "properties": properties}
+    if required:
+        result["required"] = required
+    return result
 
 
-def _build_model_property(model_list: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Build the model property schema, optionally with enum including aliases."""
-    from .handlers.model_registry import DEFAULT_ALIASES
-
-    prop: Dict[str, Any] = {
-        "type": "string",
-        "description": _build_model_description(model_list),
-    }
-    if model_list:
-        # Include aliases in enum so MCP client doesn't reject them
-        aliases = sorted(DEFAULT_ALIASES.keys())
-        prop["enum"] = model_list + aliases
-    return prop
-
-
-def build_tools(model_list: Optional[List[str]] = None) -> List[Tool]:
-    """
-    Build tool definitions, optionally populating model enum dynamically.
-
-    Args:
-        model_list: List of valid model IDs to populate the enum
-    """
+def build_tools() -> list[Tool]:
+    """Return the stable public MCP tool catalog."""
     return [
         Tool(
-            name="opencode_prompt",
-            description="Send a prompt to OpenCode. This is the main tool for interacting with OpenCode. "
-            "Uses persistent HTTP connection for fast response.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "message": {
-                        "type": "string",
-                        "description": "The prompt/message to send to OpenCode",
-                    },
-                    "directory": {
-                        "type": "string",
-                        "description": "Working directory for the operation (optional)",
-                    },
-                    "session_id": {
-                        "type": "string",
-                        "description": "Existing session ID to continue conversation (optional)",
-                    },
-                    "model": _build_model_property(model_list),
-                    "agent": {
-                        "type": "string",
-                        "description": "Agent mode to use. 'build' has full read/write access for implementation tasks. "
-                        "'plan' is read-only for analysis, planning, and code review. "
-                        "If omitted, uses the server default.",
-                        "enum": ["build", "plan"],
-                    },
-                    "timeout": {
-                        "type": "number",
-                        "default": 600,
-                        "description": "Timeout in seconds (default: 600)",
-                    },
-                    "max_output_tokens": {
-                        "type": "number",
-                        "default": 25000,
-                        "description": "Maximum number of tokens for the model's response (default: 25000). "
-                        "This is a soft limit enforced through enhanced prompt instructions with emphasis, "
-                        "consequences, and strategic guidance. The instruction adapts based on token range "
-                        "for optimal compliance. Note: This is not a hard API limit.",
-                    },
-                    "variant": {
-                        "type": "string",
-                        "description": "Optional model variant for Gemini models to control reasoning level. "
-                        "Options: 'minimal', 'low', 'medium' (default), 'high'. "
-                        "Use 'high' for complex analysis and deep reasoning, 'low' for simple queries, "
-                        "'medium' for standard tasks. If not specified, defaults to 'medium'. "
-                        "Only applies to google/gemini-* models.",
-                        "enum": ["minimal", "low", "medium", "high"],
-                    },
-                    "use_ultrawork": {
-                        "type": "boolean",
-                        "default": True,
-                        "description": "Enable oh-my-opencode multi-agent orchestration via 'ulw' keyword injection. "
-                        "When enabled (default), prompts are prefixed with 'ulw' to activate Sisyphus orchestration "
-                        "for automatic task decomposition and multi-agent execution. Set to false for direct execution "
-                        "without orchestration.",
-                    },
+            name="opencode_job_start",
+            description="Start a persistent OpenCode job and return its job_id immediately.",
+            inputSchema=_schema(
+                {
+                    "message": {"type": "string", "minLength": 1},
+                    "directory": {"type": "string", "description": "Absolute project directory"},
+                    "agent": {"type": "string", "description": "Any agent returned by opencode_list_agents"},
+                    "model": {"type": "string"},
+                    "variant": {"type": "string"},
+                    "session_id": {"type": "string"},
+                    "orchestration": {"type": "string", "enum": ["direct", "ulw"], "default": "direct"},
+                    "max_runtime_seconds": {"type": "integer", "minimum": 1},
+                    "max_output_tokens": {"type": "integer", "minimum": 1, "default": 25000},
                 },
-                "required": ["message"],
-            },
+                ["message", "directory"],
+            ),
+        ),
+        Tool(
+            name="opencode_job_status",
+            description="Inspect job lifecycle, health, activity timestamps, and pending interaction.",
+            inputSchema=_schema({"job_id": {"type": "string"}}, ["job_id"]),
+        ),
+        Tool(
+            name="opencode_job_result",
+            description="Read bounded output, reasoning, tool calls, and final error for a job.",
+            inputSchema=_schema(
+                {"job_id": {"type": "string"}, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1}},
+                ["job_id"],
+            ),
+        ),
+        Tool(
+            name="opencode_job_respond",
+            description="Resolve a pending permission or question for a job.",
+            inputSchema=_schema(
+                {
+                    "job_id": {"type": "string"},
+                    "interaction_id": {"type": "string"},
+                    "decision": {"type": "string", "enum": ["once", "always", "reject"]},
+                    "answers": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+                },
+                ["job_id", "interaction_id"],
+            ),
+        ),
+        Tool(
+            name="opencode_job_cancel",
+            description="Abort the OpenCode session and cancel a running job.",
+            inputSchema=_schema({"job_id": {"type": "string"}}, ["job_id"]),
+        ),
+        Tool(
+            name="opencode_job_list",
+            description="List recent persistent OpenCode jobs.",
+            inputSchema=_schema({"limit": {"type": "integer", "minimum": 1, "maximum": 500}}),
+        ),
+        Tool(
+            name="opencode_list_agents",
+            description="List agents available to OpenCode in a project directory.",
+            inputSchema=_schema({"directory": {"type": "string"}}, ["directory"]),
         ),
         Tool(
             name="opencode_list_models",
-            description="List available LLM models/providers from OpenCode CLI. "
-            "Returns all available models in provider/model format.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "provider": {
-                        "type": "string",
-                        "description": "Optional provider to filter by (e.g., 'google', 'openai')",
-                    },
-                },
-            },
+            description="List models available to the OpenCode CLI.",
+            inputSchema=_schema({"provider": {"type": "string"}}),
         ),
         Tool(
             name="opencode_list_sessions",
-            description="List all active sessions. Useful to find session IDs for continuing conversations.",
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
+            description="List OpenCode sessions using the CLI.",
+            inputSchema=_schema({}),
         ),
         Tool(
             name="opencode_health_check",
-            description="Check OpenCode server health: CLI availability, serve API status, cached models, and version.",
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
-        ),
-        # =====================================================================
-        # Search & File Tools (via opencode serve API)
-        # =====================================================================
-        Tool(
-            name="opencode_search_text",
-            description="Search for text patterns across files in the project using ripgrep. "
-            "Returns matching lines with file paths and line numbers. "
-            "Supports regex patterns. Results are limited to 200 matches.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "pattern": {
-                        "type": "string",
-                        "description": "Regex pattern to search for (ripgrep syntax)",
-                    },
-                    "directory": {
-                        "type": "string",
-                        "description": "Working directory (project root). Optional, uses server default if omitted.",
-                    },
-                },
-                "required": ["pattern"],
-            },
-        ),
-        Tool(
-            name="opencode_find_files",
-            description="Search for files by name or pattern in the project. "
-            "Returns matching file paths. Useful for locating files before reading them.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "File name or pattern to search for (e.g., 'server.py', '*.tsx')",
-                    },
-                    "directory": {
-                        "type": "string",
-                        "description": "Working directory (project root). Optional.",
-                    },
-                    "type": {
-                        "type": "string",
-                        "description": "Filter by entry type",
-                        "enum": ["file", "directory"],
-                    },
-                },
-                "required": ["query"],
-            },
-        ),
-        Tool(
-            name="opencode_read_file",
-            description="Read the content of a file. Returns text content for text files, "
-            "or a placeholder message for binary files. Large files are truncated to 100KB.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "File path relative to the project root (e.g., 'src/main.py')",
-                    },
-                    "directory": {
-                        "type": "string",
-                        "description": "Working directory (project root). Optional.",
-                    },
-                },
-                "required": ["path"],
-            },
-        ),
-        Tool(
-            name="opencode_list_directory",
-            description="List files and directories at a given path. "
-            "Shows file names, types (file/directory), and whether they are gitignored.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Directory path to list, relative to project root (default: '.')",
-                        "default": ".",
-                    },
-                    "directory": {
-                        "type": "string",
-                        "description": "Working directory (project root). Optional.",
-                    },
-                },
-            },
-        ),
-        Tool(
-            name="opencode_file_status",
-            description="Get git status of all modified files in the project. "
-            "Shows which files are added, modified, or deleted with line counts.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "directory": {
-                        "type": "string",
-                        "description": "Working directory (project root). Optional.",
-                    },
-                },
-            },
+            description="Check the MCP job database, delegated server process, CLI, and active jobs.",
+            inputSchema=_schema({}),
         ),
     ]
 
 
-# Start with static tools, will be updated dynamically after model cache loads
-TOOLS = build_tools()
-
-
 @server.list_tools()
-async def list_tools() -> List[Tool]:
-    """Return list of available tools with dynamic model enum."""
-    global TOOLS
-    try:
-        registry = await get_model_registry()
-        models = registry.get_cached_models()
-        if models:
-            TOOLS = build_tools(models)
-    except Exception as e:
-        logger.debug(f"Could not refresh model enum for tools: {e}")
-    return TOOLS
+async def list_tools() -> list[Tool]:
+    """Return the public catalog."""
+    return build_tools()
 
 
-async def _validate_and_resolve_model(model: Optional[str]) -> str:
-    """
-    Validate and resolve a model parameter.
-
-    Resolution chain: exact match → alias → fuzzy match → default.
-
-    Args:
-        model: The model string from tool arguments (may be None)
-
-    Returns:
-        A valid model ID string
-    """
-    if not model:
-        return settings.opencode_default_model or ""
-
-    try:
-        registry = await get_model_registry()
-        is_valid, resolved, method = registry.validate_and_resolve(model)
-
-        if is_valid:
-            return resolved  # Exact match
-        elif resolved:
-            logger.info(f"Model resolved via {method}: '{model}' -> '{resolved}'")
-            return resolved
-        else:
-            logger.warning(
-                f"Model '{model}' could not be resolved, falling back to default: "
-                f"'{settings.opencode_default_model}'"
-            )
-            return settings.opencode_default_model or ""
-    except Exception as e:
-        logger.error(f"Model validation error: {e}, using provided model as-is")
-        return model
-
-
-def _get_timeout_for_operation(name: str, user_timeout: Optional[int] = None) -> int:
-    """
-    Get the appropriate timeout for an operation.
-
-    Uses per-operation defaults, respects user overrides, and applies
-    the buffer for subprocess coordination.
-    """
-    if name == "opencode_list_models":
-        base_timeout = settings.timeout_list_models
-    elif name == "opencode_list_sessions":
-        base_timeout = settings.timeout_list_sessions
-    elif name == "opencode_health_check":
-        base_timeout = settings.timeout_health
-    elif name in ("opencode_search_text", "opencode_find_files"):
-        base_timeout = settings.timeout_search
-    elif name in ("opencode_read_file", "opencode_list_directory", "opencode_file_status"):
-        base_timeout = settings.timeout_file_ops
-    else:
-        base_timeout = settings.default_timeout
-
-    # User override takes priority but is capped
-    effective = min(user_timeout or base_timeout, settings.max_timeout)
-
-    return effective
+def _json_content(value: Any) -> list[TextContent]:
+    return [TextContent(type="text", text=json.dumps(value, indent=2, default=str))]
 
 
 @server.call_tool()
-async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
-    """
-    Handle tool calls with model validation and adaptive timeouts.
-
-    Args:
-        name: Tool name
-        arguments: Tool arguments
-
-    Returns:
-        List of TextContent with results
-    """
-    logger.info(f"Tool called: {name} with arguments: {arguments}")
-    start_time = time.time()
-
+async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:  # noqa: ANN401
+    """Dispatch a validated MCP call to the job manager or CLI discovery."""
+    manager = _manager()
     try:
-        result: OpenCodeResult
-
-        if name == "opencode_prompt":
-            execution_handler = ExecutionHandler(OpenCodeExecutor())
-
-            # Validate and resolve model
-            raw_model = arguments.get("model")
-            model = await _validate_and_resolve_model(raw_model)
-
-            session_id = arguments.get("session_id")
-            directory = arguments.get("directory")
-            agent = arguments.get("agent") or settings.opencode_default_agent
-            max_output_tokens = arguments.get(
-                "max_output_tokens", settings.default_max_output_tokens
+        if name == "opencode_job_start":
+            record = await manager.start(JobStartRequest.model_validate(arguments))
+            return _json_content(record.model_dump(mode="json"))
+        if name == "opencode_job_status":
+            return _json_content((await manager.status(arguments["job_id"])).model_dump(mode="json"))
+        if name == "opencode_job_result":
+            result = await manager.result(arguments["job_id"], arguments.get("offset", 0), arguments.get("limit", 20_000))
+            return _json_content(result.model_dump(mode="json"))
+        if name == "opencode_job_respond":
+            record = await manager.respond(
+                arguments["job_id"],
+                arguments["interaction_id"],
+                arguments.get("decision"),
+                arguments.get("answers"),
             )
-            timeout = _get_timeout_for_operation(name, arguments.get("timeout"))
-
-            if session_id:
-                result = await execution_handler.continue_session(
-                    session_id=session_id,
-                    message=arguments.get("message"),
-                    timeout=timeout,
-                    max_output_tokens=max_output_tokens,
-                )
-                result.model = "(session continues with original model)"
-            else:
-                use_ultrawork = arguments.get("use_ultrawork", True)
-                result = await execution_handler.run(
-                    message=arguments["message"],
-                    model=model,
-                    agent=agent,
-                    timeout=timeout,
-                    max_output_tokens=max_output_tokens,
-                    variant=arguments.get("variant"),
-                    use_ultrawork=use_ultrawork,
-                    cwd=directory,
-                )
-                # Show resolution info if model was corrected
-                if raw_model and raw_model != model:
-                    result.model = f"{model} (resolved from '{raw_model}')"
-                else:
-                    result.model = model
-
-        elif name == "opencode_list_models":
-            executor = OpenCodeExecutor()
-            timeout = _get_timeout_for_operation(name)
-            result = await executor.list_models(
-                provider=arguments.get("provider"),
-                timeout=timeout,
-            )
-
-        elif name == "opencode_list_sessions":
-            executor = OpenCodeExecutor()
-            timeout = _get_timeout_for_operation(name)
-            result = await executor.list_sessions(timeout=timeout)
-
-        elif name == "opencode_health_check":
-            result = await _execute_health_check()
-
-        # =================================================================
-        # Search & File Tools (via serve API)
-        # =================================================================
-
-        elif name == "opencode_search_text":
-            pattern = arguments.get("pattern", "").strip()
-            if not pattern:
-                raise ValueError("'pattern' is required and cannot be empty")
-            handler = await get_or_create_serve_handler()
-            result = await handler.search_text(
-                pattern=pattern,
-                directory=arguments.get("directory"),
-            )
-
-        elif name == "opencode_find_files":
-            query = arguments.get("query", "").strip()
-            if not query:
-                raise ValueError("'query' is required and cannot be empty")
-            handler = await get_or_create_serve_handler()
-            result = await handler.find_files(
-                query=query,
-                directory=arguments.get("directory"),
-                file_type=arguments.get("type"),
-            )
-
-        elif name == "opencode_read_file":
-            path = arguments.get("path", "").strip()
-            if not path:
-                raise ValueError("'path' is required and cannot be empty")
-            handler = await get_or_create_serve_handler()
-            result = await handler.read_file(
-                path=path,
-                directory=arguments.get("directory"),
-            )
-
-        elif name == "opencode_list_directory":
-            handler = await get_or_create_serve_handler()
-            result = await handler.list_directory(
-                path=arguments.get("path", "."),
-                directory=arguments.get("directory"),
-            )
-
-        elif name == "opencode_file_status":
-            handler = await get_or_create_serve_handler()
-            result = await handler.file_status(
-                directory=arguments.get("directory"),
-            )
-
-        else:
-            raise ValueError(f"Unknown tool: {name}")
-
-        # Format result as JSON
-        result_json = result.model_dump_json(indent=2)
-        return [TextContent(type="text", text=result_json)]
-
-    except ValueError as e:
-        logger.error(f"Validation error in tool {name}: {str(e)}")
-        error_result = OpenCodeResult(
-            success=False,
-            error=f"Validation error: {str(e)}",
-            execution_time=time.time() - start_time,
-            exit_code=1,
-            is_error=True,
-        )
-        return [TextContent(type="text", text=error_result.model_dump_json(indent=2))]
-
-    except Exception as e:
-        logger.error(f"Error executing tool {name}: {str(e)}", exc_info=True)
-        error_result = OpenCodeResult(
-            success=False,
-            error=f"Error: {str(e)}",
-            execution_time=time.time() - start_time,
-            exit_code=1,
-            is_error=True,
-        )
-        return [TextContent(type="text", text=error_result.model_dump_json(indent=2))]
-
-
-async def _execute_health_check() -> OpenCodeResult:
-    """Execute a comprehensive health check."""
-    start_time = time.time()
-    health_data = {
-        "cli_available": False,
-        "cli_version": None,
-        "serve_api_running": False,
-        "models_cached": 0,
-        "cached_models": [],
-        "default_model": settings.opencode_default_model,
-        "server_version": settings.mcp_server_version,
-    }
-
-    executor = OpenCodeExecutor()
-
-    # Check CLI availability
-    try:
-        version = await executor.get_version()
-        if version:
-            health_data["cli_available"] = True
-            health_data["cli_version"] = version
-    except Exception as e:
-        health_data["cli_error"] = str(e)
-
-    # Check serve API
-    try:
-        serve_running = await executor._is_serve_running()
-        health_data["serve_api_running"] = serve_running
-    except Exception:
-        pass
-
-    # Check model registry
-    try:
-        registry = await get_model_registry()
-        models = registry.get_cached_models()
-        health_data["models_cached"] = len(models)
-        health_data["cached_models"] = models
-    except Exception as e:
-        health_data["model_cache_error"] = str(e)
-
-    all_ok = health_data["cli_available"] and health_data["models_cached"] > 0
-
-    return OpenCodeResult(
-        success=all_ok,
-        data=health_data,
-        execution_time=time.time() - start_time,
-        exit_code=0 if all_ok else 1,
-    )
-
-
-async def main():
-    """Main entry point for the MCP server."""
-    logger.info(f"Starting OpenCode MCP Server v{settings.mcp_server_version}")
-    logger.info(f"Default timeout: {settings.default_timeout}s")
-    logger.info(f"Default model: {settings.opencode_default_model}")
-
-    # Pre-populate model registry in background (non-blocking)
-    async def _warmup_registry():
-        try:
+            return _json_content(record.model_dump(mode="json"))
+        if name == "opencode_job_cancel":
+            record = await manager.cancel(arguments["job_id"])
+            return _json_content(record.model_dump(mode="json"))
+        if name == "opencode_job_list":
+            jobs = await manager.list(arguments.get("limit", 50))
+            return _json_content([job.model_dump(mode="json") for job in jobs])
+        if name == "opencode_list_agents":
+            return _json_content(await manager.list_agents(arguments["directory"]))
+        if name == "opencode_list_models":
+            result = await OpenCodeExecutor().list_models(provider=arguments.get("provider"))
+            return _json_content(result.model_dump(mode="json"))
+        if name == "opencode_list_sessions":
+            result = await OpenCodeExecutor().list_sessions()
+            return _json_content(result.model_dump(mode="json"))
+        if name == "opencode_health_check":
             registry = await get_model_registry()
-            models = registry.get_cached_models()
-            logger.info(f"Model registry warmed up: {len(models)} models")
-        except Exception as e:
-            logger.warning(f"Model registry warmup failed (will retry on first use): {e}")
-
-    # Start warmup as background task
-    warmup_task = asyncio.create_task(_warmup_registry())
-
-    try:
-        # Run the MCP server with stdio transport
-        async with stdio_server() as (read_stream, write_stream):
-            await server.run(
-                read_stream,
-                write_stream,
-                server.create_initialization_options(),
+            cli = await OpenCodeExecutor().check_status()
+            return _json_content(
+                {
+                    "manager": manager.health(),
+                    "cli": cli.model_dump(mode="json"),
+                    "models_cached": len(registry.get_cached_models()),
+                }
             )
-    finally:
-        # Cancel warmup if still running
-        if not warmup_task.done():
-            warmup_task.cancel()
+        raise ValueError(f"Unknown tool: {name}")
+    except (KeyError, ValueError, OSError) as error:
+        logger.error("MCP tool failed", extra={"tool": name, "error": str(error)})
+        return _json_content({"success": False, "error": str(error), "tool": name})
 
-        # Cleanup serve handler if it was initialized
-        global _serve_handler
-        if _serve_handler is not None:
-            logger.info("Shutting down serve handler...")
-            await _serve_handler.shutdown()
-            _serve_handler = None
+
+async def main() -> None:
+    """Run the MCP server over stdio and recover persisted monitors."""
+    await _manager().recover()
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(read_stream, write_stream, server.create_initialization_options())
+    finally:
+        await _manager().shutdown()
 
 
 if __name__ == "__main__":
