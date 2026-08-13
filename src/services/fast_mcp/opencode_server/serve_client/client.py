@@ -164,7 +164,7 @@ class OpenCodeServeClient:
                 )
             self._connected = True
             logger.info(f"Connected to OpenCode serve at {self.base_url}")
-        except httpx.ConnectError as e:
+        except (httpx.ConnectError, httpx.ReadTimeout) as e:
             await self.disconnect()
             raise ServerNotRunningError(
                 f"Cannot connect to OpenCode serve at {self.base_url}. "
@@ -418,6 +418,62 @@ class OpenCodeServeClient:
         
         # Session not found or idle
         return SessionStatus(type=SessionStatusType.IDLE)
+
+    async def list_agents(self, directory: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List agents available to the OpenCode instance for a directory."""
+        headers = self._get_headers(directory)
+        response = await self.client.get("/agent", headers=headers)
+        response.raise_for_status()
+        data = await self._parse_json_response(response, "/agent")
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        return []
+
+    async def list_pending_permissions(self, directory: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List permissions currently waiting for a response."""
+        headers = self._get_headers(directory)
+        params = {"directory": directory or self.directory} if (directory or self.directory) else None
+        response = await self.client.get("/permission", params=params, headers=headers)
+        response.raise_for_status()
+        data = await self._parse_json_response(response, "/permission")
+        return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
+    async def list_pending_questions(self, directory: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List questions currently waiting for a response."""
+        headers = self._get_headers(directory)
+        params = {"directory": directory or self.directory} if (directory or self.directory) else None
+        response = await self.client.get("/question", params=params, headers=headers)
+        response.raise_for_status()
+        data = await self._parse_json_response(response, "/question")
+        return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
+    async def reply_question(
+        self,
+        request_id: str,
+        answers: List[List[str]],
+        directory: Optional[str] = None,
+    ) -> None:
+        """Reply to a pending OpenCode question."""
+        headers = self._get_headers(directory)
+        params = {"directory": directory or self.directory} if (directory or self.directory) else None
+        response = await self.client.post(
+            f"/question/{request_id}/reply",
+            params=params,
+            headers=headers,
+            json={"answers": answers},
+        )
+        response.raise_for_status()
+
+    async def reject_question(self, request_id: str, directory: Optional[str] = None) -> None:
+        """Reject a pending OpenCode question."""
+        headers = self._get_headers(directory)
+        params = {"directory": directory or self.directory} if (directory or self.directory) else None
+        response = await self.client.post(
+            f"/question/{request_id}/reject",
+            params=params,
+            headers=headers,
+        )
+        response.raise_for_status()
     
     async def abort_session(self, session_id: str) -> None:
         """
