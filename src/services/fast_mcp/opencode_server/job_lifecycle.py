@@ -18,6 +18,7 @@ from .job_models import (
     JobStartRequest,
     JobStatus,
 )
+from .opencode_executor import OpenCodeExecutor
 from .serve_client.client import OpenCodeServeClient, ServerNotRunningError
 from .serve_client.models import ModelInfo, PermissionResponseType
 
@@ -27,15 +28,25 @@ class JobLifecycleMixin:
 
     async def start(self, request: JobStartRequest) -> JobRecord:
         """Start a job and return after OpenCode accepts its prompt."""
+        model = await self._validate_model(request.model, request.variant)
         self.process.start(request.directory)
         client = self.client_factory(request.directory)
         await self._connect_with_retry(client)
         if request.agent is not None:
             agents = await client.list_agents(request.directory)
-            names = {str(agent.get("name")) for agent in agents}
+            names = sorted(
+                {
+                    name
+                    for agent in agents
+                    if (name := str(agent.get("name", "")).strip())
+                }
+            )
             if request.agent not in names:
                 await client.disconnect()
-                raise ValueError(f"Unknown OpenCode agent: {request.agent}")
+                available = ", ".join(names) or "none"
+                raise ValueError(
+                    f"Unknown OpenCode agent: {request.agent}. Available agents: {available}"
+                )
 
         session_id = request.session_id
         if session_id is None:
@@ -59,10 +70,6 @@ class JobLifecycleMixin:
         self._clients[record.job_id] = client
         record = await self._reconcile_output(record, client)
         message = request.message if request.orchestration.value == "direct" else f"ulw {request.message}"
-        model = None
-        if request.model is not None and "/" in request.model:
-            provider, model_id = request.model.split("/", 1)
-            model = ModelInfo(providerID=provider, modelID=model_id)
         monitor = asyncio.create_task(self._monitor(record.job_id))
         self._tasks[record.job_id] = monitor
         await asyncio.sleep(0)
@@ -82,6 +89,41 @@ class JobLifecycleMixin:
                 self._tasks.pop(record.job_id, None)
                 self._clients.pop(record.job_id, None)
         return record
+
+    async def _validate_model(
+        self,
+        model: str | None,
+        variant: str | None,
+    ) -> ModelInfo | None:
+        if model is None:
+            return None
+        if "/" not in model:
+            raise ValueError("Model must use the exact provider/model format")
+
+        provider, model_id = model.split("/", 1)
+        if not provider or not model_id:
+            raise ValueError("Model must use the exact provider/model format")
+
+        result = await OpenCodeExecutor().list_models(provider=provider)
+        if not result.success:
+            raise ValueError(
+                f"Unable to validate model '{model}': "
+                f"{result.error or 'OpenCode model listing failed'}"
+            )
+
+        available = [
+            candidate
+            for candidate in result.data or []
+            if isinstance(candidate, str)
+        ]
+        if model not in available:
+            options = ", ".join(available) or "none"
+            raise ValueError(
+                f"Unknown OpenCode model: {model}. "
+                f"Available models for provider '{provider}': {options}"
+            )
+
+        return ModelInfo(providerID=provider, modelID=model_id, variant=variant)
 
     async def recover(self) -> None:
         """Reconnect monitors for persisted jobs that were active before restart."""

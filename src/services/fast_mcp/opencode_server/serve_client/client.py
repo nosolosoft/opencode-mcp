@@ -502,7 +502,7 @@ class OpenCodeServeClient:
         response = await self.client.get(f"/session/{session_id}/message")
         response.raise_for_status()
         return await self._parse_json_response(response, f"/session/{session_id}/message")
-    
+
     async def prompt(
         self,
         session_id: str,

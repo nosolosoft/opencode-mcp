@@ -50,6 +50,16 @@ class JobManager(JobLifecycleMixin):
                     now = datetime.now(UTC)
                     current = refresh_health(current, self.STALE_AFTER_SECONDS)
                     current = check_runtime(current, now)
+                    if current.status is JobStatus.RUNNING and current.session_id:
+                        session_status = await client.get_session_status(current.session_id)
+                        if session_status.type.value == "idle":
+                            current = current.model_copy(
+                                update={
+                                    "status": JobStatus.COMPLETED,
+                                    "health": JobHealth.HEALTHY,
+                                    "completed_at": now,
+                                }
+                            )
                     if current.status is JobStatus.WAITING_INPUT and current.interaction is not None:
                         waiting_seconds = (now - current.interaction.created_at).total_seconds()
                         if waiting_seconds >= self.WAITING_INPUT_MAX_SECONDS:
